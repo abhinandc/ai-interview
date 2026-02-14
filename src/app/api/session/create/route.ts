@@ -21,11 +21,7 @@ export async function POST(request: Request) {
         title: role,
         location: 'Remote',
         level_band: level.toLowerCase() as 'junior' | 'mid' | 'senior',
-        track: 'sales',
-        role_success_criteria: 'Standard sales criteria',
-        must_have_flags: [],
-        disqualifiers: [],
-        gating_thresholds: { proceed: 70, caution: 50, stop: 30 }
+        track: 'sales'
       })
       .select()
       .single()
@@ -40,7 +36,6 @@ export async function POST(request: Request) {
         name: candidate_name,
         email: `${candidate_name.toLowerCase().replace(/\s+/g, '.')}@temp.com`,
         job_id: jobProfile.job_id,
-        applied_at: new Date().toISOString(),
         status: 'live_scheduled'
       })
       .select()
@@ -67,16 +62,17 @@ export async function POST(request: Request) {
     const salesRounds = [
       {
         round_number: 1,
-        round_type: 'voice' as const,
-        title: 'Round 1: Live Persona Sell',
-        prompt: 'Conduct a discovery call with a prospect. Ask at least 5 discovery questions, quantify value, and handle objections professionally.',
+        round_type: 'voice-realtime' as const,
+        title: 'Round 1: Live Voice Call with AI Prospect',
+        prompt: 'Conduct a live voice discovery call with an AI prospect. Ask discovery questions, handle objections, demonstrate value, and close for next steps.',
         duration_minutes: 12,
         status: 'pending' as const,
         config: {
-          persona: 'skeptical_buyer',
-          required_questions: 5,
-          required_objections: 3,
-          curveballs: ['budget_cut', 'security_concern', 'timeline_mismatch']
+          persona_id: null, // Will use default persona in API
+          scenario_id: null, // Will use default scenario
+          initial_difficulty: 3, // 1-5 scale
+          allow_curveballs: false, // For Day 2, no curveballs yet
+          voice: 'sage' // OpenAI voice
         }
       },
       {
@@ -113,11 +109,7 @@ export async function POST(request: Request) {
         generated_at: new Date().toISOString(),
         track: 'sales',
         round_plan: salesRounds,
-        question_set: {},
-        simulation_payloads: {},
-        rubric_version: '1.0',
-        models_used: ['gpt-4o'],
-        approved_by: null
+        question_set: {}
       })
       .select()
       .single()

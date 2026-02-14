@@ -2,6 +2,7 @@
 
 import { Badge } from '@/components/ui/badge'
 import { VoiceCallUI } from '@/components/rounds/VoiceCallUI'
+import { VoiceRealtimeUI } from '@/components/rounds/VoiceRealtimeUI'
 import { EmailThreadUI } from '@/components/rounds/EmailThreadUI'
 import { TextResponseUI } from '@/components/rounds/TextResponseUI'
 import type { Round } from '@/lib/types/database'
@@ -16,6 +17,7 @@ export function TaskSurface({ round }: { round: Round }) {
       <p className="text-sm text-ink-600">{round.prompt}</p>
 
       {round.round_type === 'voice' && <VoiceCallUI round={round} />}
+      {round.round_type === 'voice-realtime' && <VoiceRealtimeUI round={round} />}
       {round.round_type === 'email' && <EmailThreadUI round={round} />}
       {round.round_type === 'text' && <TextResponseUI round={round} />}
       {round.round_type === 'code' && (

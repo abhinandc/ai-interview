@@ -2,7 +2,7 @@
 
 export type SessionStatus = 'scheduled' | 'live' | 'completed' | 'aborted'
 export type RoundStatus = 'pending' | 'active' | 'completed' | 'skipped'
-export type RoundType = 'voice' | 'email' | 'text' | 'code'
+export type RoundType = 'voice' | 'email' | 'text' | 'code' | 'voice-realtime'
 export type CandidateStatus = 'applied' | 'pi_scheduled' | 'pi_passed' | 'live_scheduled' | 'live_completed' | 'rejected' | 'advanced'
 export type Track = 'sales' | 'agentic_eng' | 'fullstack' | 'marketing' | 'implementation' | 'HR' | 'security'
 
@@ -174,6 +174,62 @@ export interface RipplingWriteback {
   status: 'queued' | 'sent' | 'failed'
   error: string | null
   created_at?: string
+}
+
+// 13. Personas (Voice Realtime)
+export interface Persona {
+  id: string
+  name: string
+  role: string
+  company_context: string
+  personality_traits: string[]
+  communication_style: string
+  objection_patterns: string[]
+  created_at?: string
+}
+
+// 14. Scenarios (Voice Realtime)
+export interface Scenario {
+  id: string
+  title: string
+  description: string
+  industry: string
+  company_size: string
+  pain_points: string[]
+  budget_range: string
+  decision_timeline: string
+  created_at?: string
+}
+
+// 15. Voice Commands (Interviewer Controls)
+export interface VoiceCommand {
+  id: string
+  session_id: string
+  command_type: 'difficulty_change' | 'curveball_inject'
+  payload: Record<string, any>
+  created_at: string
+}
+
+// 16. AI Assessments (Silent Observations)
+export interface AIAssessment {
+  id: string
+  session_id: string
+  round_number: number
+  timestamp: string
+  observation: string
+  dimension: string
+  severity: 'info' | 'concern' | 'red_flag'
+  created_at?: string
+}
+
+// Voice Realtime Round Config
+export interface VoiceRealtimeRoundConfig {
+  persona_id?: string
+  scenario_id?: string
+  initial_difficulty?: number // 1-5
+  allow_curveballs?: boolean
+  curveball_pool?: string[]
+  voice?: 'ash' | 'coral' | 'sage' | 'cedar' | 'marin' | 'ballad'
 }
 
 // Helper types for MVP (temporary)

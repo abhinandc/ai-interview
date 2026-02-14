@@ -3,8 +3,11 @@
 import { useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { GatePanel } from '@/components/GatePanel'
+import { VoiceControlPanel } from '@/components/VoiceControlPanel'
+import { AIAssessmentsPanel } from '@/components/AIAssessmentsPanel'
 import { SessionProvider, useSession } from '@/contexts/SessionContext'
 
 type TranscriptEntry = {
@@ -17,6 +20,101 @@ type ActionEntry = {
   action: string
   detail?: string
   time: string
+}
+
+// Analyze live transcript in real-time
+function analyzeTranscript(transcript: TranscriptEntry[]) {
+  if (!transcript || transcript.length === 0) {
+    return {
+      overall: 0,
+      confidence: 0,
+      dimensions: [],
+      redFlags: [],
+      followups: []
+    }
+  }
+
+  const userMessages = transcript.filter(t => t.speaker === 'Candidate')
+  const agentMessages = transcript.filter(t => t.speaker === 'Prospect')
+
+  // Calculate metrics
+  const avgUserLength = userMessages.reduce((sum, m) => sum + m.content.length, 0) / Math.max(userMessages.length, 1)
+  const avgAgentLength = agentMessages.reduce((sum, m) => sum + m.content.length, 0) / Math.max(agentMessages.length, 1)
+  const totalTurns = transcript.length
+  const userTurns = userMessages.length
+
+  // Dimension scores (0-100)
+  const dimensions = []
+
+  // Engagement: based on response length and frequency
+  const engagementScore = Math.min(100, (avgUserLength / 150) * 100)
+  dimensions.push({ label: 'Engagement', score: Math.round(engagementScore), max: 100 })
+
+  // Clarity: based on sentence structure (simple heuristic)
+  const clarityScore = avgUserLength > 20 && avgUserLength < 300 ? 80 : 50
+  dimensions.push({ label: 'Clarity', score: clarityScore, max: 100 })
+
+  // Turn-taking: balanced conversation
+  const balanceRatio = userTurns / Math.max(totalTurns, 1)
+  const turnTakingScore = Math.max(0, 100 - Math.abs(0.5 - balanceRatio) * 200)
+  dimensions.push({ label: 'Turn-taking', score: Math.round(turnTakingScore), max: 100 })
+
+  // Overall score (average of dimensions)
+  const overall = Math.round(dimensions.reduce((sum, d) => sum + d.score, 0) / dimensions.length)
+
+  // Detect red flags
+  const redFlags = []
+
+  if (avgUserLength < 30) {
+    redFlags.push({
+      label: 'Short responses',
+      detail: 'Candidate responses are too brief, lacking detail'
+    })
+  }
+
+  if (userTurns < 3 && transcript.length > 6) {
+    redFlags.push({
+      label: 'Low engagement',
+      detail: 'Candidate not participating actively in conversation'
+    })
+  }
+
+  const lastUserMessage = userMessages[userMessages.length - 1]
+  if (lastUserMessage && (
+    lastUserMessage.content.toLowerCase().includes('i don\'t know') ||
+    lastUserMessage.content.toLowerCase().includes('not sure')
+  )) {
+    redFlags.push({
+      label: 'Uncertainty',
+      detail: 'Candidate expressing uncertainty or lack of knowledge'
+    })
+  }
+
+  // Generate follow-ups based on conversation
+  const followups = []
+
+  if (avgUserLength < 50) {
+    followups.push('Ask for specific examples or stories')
+  }
+
+  if (redFlags.length > 0) {
+    followups.push('Probe deeper on areas of concern')
+  }
+
+  if (userTurns > 0 && agentMessages.length > 0) {
+    followups.push('Ask about their problem-solving approach')
+  }
+
+  // Confidence based on sample size
+  const confidence = Math.min(0.9, (transcript.length / 10) * 0.3 + 0.4)
+
+  return {
+    overall,
+    confidence,
+    dimensions,
+    redFlags,
+    followups
+  }
 }
 
 function buildGateData(scores: any[]) {
@@ -119,7 +217,22 @@ function buildTranscript(events: any[]) {
   const entries: TranscriptEntry[] = []
 
   for (const event of events || []) {
-    if (event.event_type === 'prospect_message') {
+    // Handle voice-realtime transcript events
+    if (event.event_type === 'voice_transcript') {
+      const role = event.payload?.role
+      const text = event.payload?.text
+      const time = new Date(event.created_at).toLocaleTimeString()
+
+      if (text) {
+        entries.push({
+          speaker: role === 'user' ? 'Candidate' : 'Prospect',
+          content: text,
+          time
+        })
+      }
+    }
+    // Handle legacy prospect_message events
+    else if (event.event_type === 'prospect_message') {
       const candidateMessage = event.payload?.candidate_message
       const prospectResponse = event.payload?.prospect_response
       const time = new Date(event.created_at).toLocaleTimeString()
@@ -188,10 +301,19 @@ function buildActionLog(events: any[]) {
 }
 
 function InterviewerView() {
-  const { session, scores, events, rounds } = useSession()
+  const { session, scores, events, rounds, assessments } = useSession()
 
-  const gateData = useMemo(() => buildGateData(scores as any[]), [scores])
   const transcript = useMemo(() => buildTranscript(events as any[]), [events])
+
+  // Use real-time transcript analysis for live Gate Panel, scores for final results
+  const gateData = useMemo(() => {
+    // During live call: analyze transcript in real-time
+    if (session?.status === 'live' && transcript && transcript.length > 0) {
+      return analyzeTranscript(transcript)
+    }
+    // After call: use final AI scores
+    return buildGateData(scores as any[])
+  }, [session?.status, transcript, scores])
   const actionLog = useMemo(() => buildActionLog(events as any[]), [events])
   const noAnswerFlag = useMemo(() => {
     return gateData.redFlags.some((flag) =>
@@ -219,6 +341,12 @@ function InterviewerView() {
   const candidateName = (session as any).candidate?.name || 'Candidate'
   const jobTitle = (session as any).job?.title || 'Role'
   const jobLevel = (session as any).job?.level_band || 'mid'
+
+  // Check if current round is voice-realtime
+  const activeRound = (rounds || []).find((round) => round.status === 'active')
+  const isVoiceRealtimeActive = activeRound?.round_type === 'voice-realtime'
+  // Call is in progress if round is active (status can be 'live' or 'in_progress')
+  const isCallInProgress = activeRound?.status === 'active' && isVoiceRealtimeActive
 
   const sendAction = async (action_type: string, payload?: Record<string, any>) => {
     await fetch('/api/interviewer/action', {
@@ -286,7 +414,37 @@ function InterviewerView() {
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">
                   Live Interview
                 </p>
-                <Badge tone="sky">{session.status}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge tone="sky">{session.status}</Badge>
+                  {session.status === 'live' && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        if (!confirm('Complete this session? All pending rounds will be skipped.')) {
+                          return
+                        }
+                        try {
+                          const response = await fetch(`/api/session/${session.id}/complete`, {
+                            method: 'POST'
+                          })
+                          const result = await response.json()
+                          if (result.success) {
+                            alert('Session completed! Refresh to see updated status.')
+                            window.location.reload()
+                          } else {
+                            alert('Failed to complete session: ' + result.error)
+                          }
+                        } catch (err) {
+                          console.error('Failed to complete session:', err)
+                          alert('Error completing session')
+                        }
+                      }}
+                    >
+                      Complete Session
+                    </Button>
+                  )}
+                </div>
               </div>
               <div>
                 <h1 className="text-xl font-semibold text-ink-900">{candidateName}</h1>
@@ -385,6 +543,56 @@ function InterviewerView() {
         </section>
 
         <aside className="space-y-6">
+          {/* Voice-Realtime Controls (only show when voice call is active) */}
+          {isVoiceRealtimeActive && (
+            <>
+              <VoiceControlPanel
+                sessionId={session.id}
+                isCallActive={isCallInProgress}
+              />
+              <AIAssessmentsPanel sessionId={session.id} />
+            </>
+          )}
+
+          {/* Debug Controls (show when no scores or for manual trigger) */}
+          {scores.length === 0 && (
+            <Card className="bg-amber-50/90 border-amber-200">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold text-amber-900">No Scores Yet</h4>
+                    <p className="text-xs text-amber-700 mt-1">
+                      Scores generate automatically when rounds complete. Or trigger manually:
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const response = await fetch('/api/score/trigger', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session_id: session.id,
+                            round_number: 1
+                          })
+                        })
+                        const result = await response.json()
+                        console.log('Scoring triggered:', result)
+                        alert('Scoring triggered! Check Gate Panel in a few seconds.')
+                      } catch (err) {
+                        console.error('Failed to trigger scoring:', err)
+                        alert('Failed to trigger scoring. Check console.')
+                      }
+                    }}
+                  >
+                    Trigger Scoring
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <GatePanel
             overall={gateData.overall}
             confidence={gateData.confidence}

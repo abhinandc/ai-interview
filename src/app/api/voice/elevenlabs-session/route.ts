@@ -47,19 +47,35 @@ export async function POST(request: Request) {
       )
     }
 
-    // Step 3.5: Validate round status to prevent duplicate agent creation
-    if (voiceRound.status !== 'pending') {
-      console.warn('Voice round is not in pending state:', voiceRound.status)
-      return NextResponse.json(
-        { error: 'Voice round is not in pending state or already started' },
-        { status: 400 }
-      )
-    }
-
     const roundConfig = voiceRound.config as VoiceRealtimeRoundConfig
     const personaId = roundConfig.persona_id
     const scenarioId = roundConfig.scenario_id
     const difficultyLevel = difficulty || roundConfig.initial_difficulty || 3
+
+    // Step 3.5: Check if agent already exists (for reconnections)
+    const existingAgentId = (roundConfig as any).agent_id
+
+    if (existingAgentId && (voiceRound.status === 'active' || voiceRound.status === 'pending')) {
+      console.log('🔄 Reusing existing agent:', existingAgentId)
+      const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${existingAgentId}`
+
+      return NextResponse.json({
+        ws_url: wsUrl,
+        agent_id: existingAgentId,
+        session_id,
+        difficulty: difficultyLevel,
+        reused: true
+      })
+    }
+
+    // Only allow agent creation if round is pending or active
+    if (voiceRound.status !== 'pending' && voiceRound.status !== 'active') {
+      console.warn('Voice round is not in pending/active state:', voiceRound.status)
+      return NextResponse.json(
+        { error: 'Voice round must be pending or active to create agent' },
+        { status: 400 }
+      )
+    }
 
     // Step 4: Fetch persona (use default if not specified)
     let persona: Persona | null = null
@@ -222,7 +238,26 @@ export async function POST(request: Request) {
 
     console.log('✅ Created ElevenLabs agent:', agentId)
 
-    // Step 8: Log agent creation to live_events for audit trail
+    // Step 8: Store agent_id in round config for reuse on reconnection
+    const updatedRoundPlan = (scopePackage.round_plan as Round[]).map((r) => {
+      if (r.round_type === 'voice-realtime') {
+        return {
+          ...r,
+          config: {
+            ...r.config,
+            agent_id: agentId
+          }
+        }
+      }
+      return r
+    })
+
+    await supabaseAdmin
+      .from('interview_scope_packages')
+      .update({ round_plan: updatedRoundPlan })
+      .eq('session_id', session_id)
+
+    // Step 9: Log agent creation to live_events for audit trail
     await supabaseAdmin.from('live_events').insert({
       session_id: session_id,
       event_type: 'elevenlabs_agent_created',
@@ -237,7 +272,7 @@ export async function POST(request: Request) {
       }
     })
 
-    // Step 9: Return agent_id to client
+    // Step 10: Return agent_id to client
     const wsUrl = `wss://api.elevenlabs.io/v1/convai/conversation?agent_id=${agentId}`
 
     return NextResponse.json({

@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase/server'
 
 export async function POST(request: Request) {
   try {
-    const { candidate_name, role, level } = await request.json()
+    const { candidate_name, role, level, track, difficulty } = await request.json()
 
     // Validate inputs
     if (!candidate_name || !role || !level) {
@@ -13,6 +13,11 @@ export async function POST(request: Request) {
       )
     }
 
+    // Default track to 'sales' if not provided
+    const jobTrack = track || 'sales'
+    // Default difficulty to 3 if not provided
+    const voiceDifficulty = difficulty || 3
+
     // Step 1: Create job profile
     const { data: jobProfile, error: jobError } = await supabaseAdmin
       .from('job_profiles')
@@ -21,7 +26,7 @@ export async function POST(request: Request) {
         title: role,
         location: 'Remote',
         level_band: level.toLowerCase() as 'junior' | 'mid' | 'senior',
-        track: 'sales'
+        track: jobTrack as 'sales' | 'agentic_eng' | 'fullstack' | 'marketing' | 'implementation' | 'HR' | 'security'
       })
       .select()
       .single()
@@ -70,7 +75,7 @@ export async function POST(request: Request) {
         config: {
           persona_id: null, // Will use default persona in API
           scenario_id: null, // Will use default scenario
-          initial_difficulty: 3, // 1-5 scale
+          initial_difficulty: voiceDifficulty, // 1-5 scale
           allow_curveballs: false, // For Day 2, no curveballs yet
           voice: 'sage' // OpenAI voice
         }
@@ -107,7 +112,7 @@ export async function POST(request: Request) {
       .insert({
         session_id: session.id,
         generated_at: new Date().toISOString(),
-        track: 'sales',
+        track: jobTrack,
         round_plan: salesRounds,
         question_set: {}
       })
@@ -123,7 +128,7 @@ export async function POST(request: Request) {
       payload: {
         candidate_id: candidate.id,
         job_id: jobProfile.id,
-        track: 'sales'
+        track: jobTrack
       }
     })
 

@@ -9,6 +9,9 @@ import { GatePanel } from '@/components/GatePanel'
 import { VoiceControlPanel } from '@/components/VoiceControlPanel'
 import { AIAssessmentsPanel } from '@/components/AIAssessmentsPanel'
 import { SessionProvider, useSession } from '@/contexts/SessionContext'
+import { useVoiceAnalysis } from '@/hooks/useVoiceAnalysis'
+import { SayMeter } from '@/components/voice/SayMeter'
+import { SuggestionsPanel } from '@/components/voice/SuggestionsPanel'
 
 type TranscriptEntry = {
   speaker: string
@@ -303,6 +306,16 @@ function buildActionLog(events: any[]) {
 function InterviewerView() {
   const { session, scores, events, rounds, assessments } = useSession()
 
+  // Check if current round is voice-realtime
+  const activeRound = (rounds || []).find((round) => round.status === 'active')
+  const isVoiceRealtimeActive = activeRound?.round_type === 'voice-realtime'
+
+  // Voice analytics hook
+  const analytics = useVoiceAnalysis({
+    sessionId: session?.id || '',
+    enabled: session?.status === 'live' && isVoiceRealtimeActive
+  })
+
   const transcript = useMemo(() => buildTranscript(events as any[]), [events])
 
   // Use real-time transcript analysis for live Gate Panel, scores for final results
@@ -342,9 +355,6 @@ function InterviewerView() {
   const jobTitle = (session as any).job?.title || 'Role'
   const jobLevel = (session as any).job?.level_band || 'mid'
 
-  // Check if current round is voice-realtime
-  const activeRound = (rounds || []).find((round) => round.status === 'active')
-  const isVoiceRealtimeActive = activeRound?.round_type === 'voice-realtime'
   // Call is in progress if round is active (status can be 'live' or 'in_progress')
   const isCallInProgress = activeRound?.status === 'active' && isVoiceRealtimeActive
 
@@ -551,6 +561,27 @@ function InterviewerView() {
                 isCallActive={isCallInProgress}
               />
               <AIAssessmentsPanel sessionId={session.id} />
+
+              {/* Say Meter - Performance Health Indicator */}
+              {analytics.sayMeter && (
+                <SayMeter
+                  score={analytics.sayMeter.score}
+                  factors={analytics.sayMeter.factors}
+                  summary={analytics.sayMeter.meter_reasoning}
+                  loading={analytics.loading}
+                />
+              )}
+
+              {/* Dynamic AI Suggestions */}
+              <SuggestionsPanel
+                suggestions={analytics.suggestions}
+                loading={analytics.loading}
+                onDismiss={analytics.dismissSuggestion}
+                onApply={(suggestion) => {
+                  console.log('Apply suggestion:', suggestion)
+                  // Could inject into AI prompt or show to interviewer
+                }}
+              />
             </>
           )}
 

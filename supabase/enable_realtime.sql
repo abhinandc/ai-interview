@@ -2,25 +2,19 @@
 -- Run this in Supabase SQL Editor
 
 -- CRITICAL: This must be done for real-time updates to work!
--- Without this, the interviewer view will NOT update during calls.
 
--- 1. Enable replication for interview_sessions
-ALTER PUBLICATION supabase_realtime ADD TABLE interview_sessions;
+-- 1. Existing tables
+ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS interview_sessions;
+ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS interview_scope_packages;
+ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS live_events;
+ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS scores;
+ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS ai_assessments;
+ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS artifacts;
+ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS voice_commands;
 
--- 2. Enable replication for interview_scope_packages (round status updates)
-ALTER PUBLICATION supabase_realtime ADD TABLE interview_scope_packages;
-
--- 3. Enable replication for live_events (transcript, actions)
-ALTER PUBLICATION supabase_realtime ADD TABLE live_events;
-
--- 4. Enable replication for scores (gate panel data)
-ALTER PUBLICATION supabase_realtime ADD TABLE scores;
-
--- 5. Enable replication for ai_assessments (AI observations)
-ALTER PUBLICATION supabase_realtime ADD TABLE ai_assessments;
-
--- 6. Enable replication for artifacts (optional, but recommended)
-ALTER PUBLICATION supabase_realtime ADD TABLE artifacts;
+-- 2. NEW: Analytics tables
+ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS voice_transcripts;
+ALTER PUBLICATION supabase_realtime ADD TABLE IF NOT EXISTS voice_analysis;
 
 -- Verify replication is enabled
 SELECT
@@ -43,6 +37,8 @@ WHERE schemaname = 'public'
     'scores',
     'ai_assessments',
     'artifacts',
-    'voice_commands'
+    'voice_commands',
+    'voice_transcripts',
+    'voice_analysis'
   )
 ORDER BY tablename;

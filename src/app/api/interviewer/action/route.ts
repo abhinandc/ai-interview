@@ -1,6 +1,57 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/server'
 
+type CurveballDefinition = {
+  key: string
+  title: string
+  detail: string
+}
+
+const curveballLibrary: Record<string, CurveballDefinition> = {
+  budget_cut: {
+    key: 'budget_cut',
+    title: 'Budget cut',
+    detail: 'Finance just reduced the initiative budget by 15%. You must justify ROI and propose a credible path to fit constraints.'
+  },
+  security_concern: {
+    key: 'security_concern',
+    title: 'Security concern',
+    detail: 'A security stakeholder is now involved. Expect deeper questions about data handling, compliance, and risk mitigation.'
+  },
+  timeline_mismatch: {
+    key: 'timeline_mismatch',
+    title: 'Timeline mismatch',
+    detail: 'The prospect needs delivery in 6 weeks, but your standard implementation is longer. You must align expectations without overpromising.'
+  },
+  competitor_pressure: {
+    key: 'competitor_pressure',
+    title: 'Competitor pressure',
+    detail: 'They are actively evaluating a competitor. You must differentiate with concrete value, proof, and a clear next step.'
+  },
+  cfo_pushback: {
+    key: 'cfo_pushback',
+    title: 'CFO pushback',
+    detail: 'The CFO is pushing back on spend and risk. You must be crisp, factual, and quantify outcomes.'
+  }
+}
+
+const personaSequence = ['skeptical_buyer', 'cfo_pushback', 'security_lead', 'champion'] as const
+
+function toArray(value: unknown) {
+  return Array.isArray(value) ? value : []
+}
+
+function normalizeRoundPlan(roundPlan: any) {
+  return Array.isArray(roundPlan) ? roundPlan : []
+}
+
+function pickNextValue<T>(sequence: readonly T[], current: T | null) {
+  if (sequence.length === 0) return null
+  const index = current ? sequence.indexOf(current) : -1
+  const nextIndex = index >= 0 ? (index + 1) % sequence.length : 0
+  return sequence[nextIndex] ?? sequence[0]!
+}
+
 export async function POST(request: Request) {
   try {
     const { session_id, action_type, payload } = await request.json()
@@ -21,6 +72,260 @@ export async function POST(request: Request) {
         ...payload
       }
     })
+
+    const now = new Date().toISOString()
+
+    // Controls that materially affect the live session should update the scope package/round plan
+    // so candidate UI and AI endpoints can react deterministically.
+    if (
+      action_type === 'inject_curveball' ||
+      action_type === 'switch_persona' ||
+      action_type === 'end_round' ||
+      action_type === 'escalate_difficulty'
+    ) {
+      const { data: scopePackage, error: scopeError } = await supabaseAdmin
+        .from('interview_scope_packages')
+        .select('id,round_plan,simulation_payloads')
+        .eq('session_id', session_id)
+        .single()
+
+      if (scopeError) throw scopeError
+
+      const roundPlan = normalizeRoundPlan(scopePackage?.round_plan)
+      const simulationPayloads = scopePackage?.simulation_payloads || {}
+      const interviewerControls = (simulationPayloads as any)?.interviewer_controls || {}
+
+      const activeRound = roundPlan.find((round: any) => round?.status === 'active') || null
+      const pendingRound = roundPlan.find((round: any) => round?.status === 'pending') || null
+      const targetRoundNumber =
+        payload?.target_round ?? activeRound?.round_number ?? pendingRound?.round_number ?? null
+
+      if (action_type === 'escalate_difficulty') {
+        const nextSimulationPayloads = {
+          ...simulationPayloads,
+          interviewer_controls: {
+            ...interviewerControls,
+            difficulty_boost: 1,
+            difficulty_boosted_at: now
+          }
+        }
+
+        const { error: updateScopeError } = await supabaseAdmin
+          .from('interview_scope_packages')
+          .update({ simulation_payloads: nextSimulationPayloads })
+          .eq('id', scopePackage.id)
+
+        if (updateScopeError) throw updateScopeError
+      }
+
+      if (action_type === 'switch_persona' && targetRoundNumber != null) {
+        const existingRound = roundPlan.find((round: any) => round?.round_number === targetRoundNumber) || null
+        const currentPersona = (existingRound?.config?.persona_override || existingRound?.config?.persona || null) as
+          | (typeof personaSequence)[number]
+          | null
+
+        const nextPersona = pickNextValue(personaSequence, currentPersona)
+
+        const updatedRoundPlan = roundPlan.map((round: any) => {
+          if (round?.round_number !== targetRoundNumber) return round
+          return {
+            ...round,
+            config: {
+              ...(round?.config || {}),
+              persona_override: nextPersona,
+              persona_switched_at: now
+            }
+          }
+        })
+
+        const nextSimulationPayloads = {
+          ...simulationPayloads,
+          interviewer_controls: {
+            ...interviewerControls,
+            persona_override: nextPersona,
+            persona_switched_at: now
+          }
+        }
+
+        const { error: updateScopeError } = await supabaseAdmin
+          .from('interview_scope_packages')
+          .update({
+            round_plan: updatedRoundPlan,
+            simulation_payloads: nextSimulationPayloads
+          })
+          .eq('id', scopePackage.id)
+
+        if (updateScopeError) throw updateScopeError
+      }
+
+      if (action_type === 'inject_curveball' && targetRoundNumber != null) {
+        const existingRound = roundPlan.find((round: any) => round?.round_number === targetRoundNumber) || null
+        const configuredCurveballs = toArray(existingRound?.config?.curveballs).map(String)
+        const existingInjected = toArray(existingRound?.config?.injected_curveballs)
+
+        const injectedKeys = new Set(
+          existingInjected
+            .map((item: any) => (typeof item === 'string' ? item : item?.key))
+            .filter(Boolean)
+        )
+
+        const candidateKeys = (payload?.curveball_key ? [String(payload.curveball_key)] : configuredCurveballs).filter(Boolean)
+        const fallbackKeys = Object.keys(curveballLibrary)
+        const selectionPool = candidateKeys.length > 0 ? candidateKeys : fallbackKeys
+
+        const nextKey =
+          selectionPool.find((key) => !injectedKeys.has(key)) || selectionPool[0] || fallbackKeys[0] || 'budget_cut'
+
+        const definition = curveballLibrary[nextKey] || {
+          key: nextKey,
+          title: nextKey.replace(/_/g, ' '),
+          detail: 'New constraint injected by interviewer.'
+        }
+
+        const nextInjected = [
+          ...existingInjected,
+          {
+            ...definition,
+            injected_at: now,
+            injected_by: 'interviewer'
+          }
+        ]
+
+        const updatedRoundPlan = roundPlan.map((round: any) => {
+          if (round?.round_number !== targetRoundNumber) return round
+          return {
+            ...round,
+            config: {
+              ...(round?.config || {}),
+              injected_curveballs: nextInjected
+            }
+          }
+        })
+
+        const nextSimulationPayloads = {
+          ...simulationPayloads,
+          interviewer_controls: {
+            ...interviewerControls,
+            last_curveball: {
+              ...definition,
+              round_number: targetRoundNumber,
+              injected_at: now
+            }
+          }
+        }
+
+        const { error: updateScopeError } = await supabaseAdmin
+          .from('interview_scope_packages')
+          .update({
+            round_plan: updatedRoundPlan,
+            simulation_payloads: nextSimulationPayloads
+          })
+          .eq('id', scopePackage.id)
+
+        if (updateScopeError) throw updateScopeError
+      }
+
+      if (action_type === 'end_round') {
+        const roundPlanForEnd = normalizeRoundPlan(scopePackage?.round_plan)
+        const active = roundPlanForEnd.find((round: any) => round?.status === 'active') || null
+
+        if (active?.round_number == null) {
+          return NextResponse.json({ ok: true, applied: { action_type, note: 'No active round to end.' } })
+        }
+
+        const activeRoundNumber = active.round_number
+
+        let nextRoundToStart: any = null
+        const nextRoundCandidate = roundPlanForEnd
+          .filter((round: any) => round?.round_number > activeRoundNumber && round?.status === 'pending')
+          .sort((a: any, b: any) => Number(a.round_number || 0) - Number(b.round_number || 0))[0]
+
+        const updatedRoundPlan = roundPlanForEnd.map((round: any) => {
+          if (round?.round_number === activeRoundNumber) {
+            return {
+              ...round,
+              status: 'completed',
+              completed_at: now
+            }
+          }
+          if (nextRoundCandidate && round?.round_number === nextRoundCandidate.round_number) {
+            nextRoundToStart = round
+            return {
+              ...round,
+              status: 'active',
+              started_at: now
+            }
+          }
+          return round
+        })
+
+        const { error: updateScopeError } = await supabaseAdmin
+          .from('interview_scope_packages')
+          .update({ round_plan: updatedRoundPlan })
+          .eq('id', scopePackage.id)
+
+        if (updateScopeError) throw updateScopeError
+
+        // Session status updates
+        if (nextRoundCandidate) {
+          await supabaseAdmin
+            .from('interview_sessions')
+            .update({ status: 'live' })
+            .eq('id', session_id)
+        } else {
+          await supabaseAdmin
+            .from('interview_sessions')
+            .update({ status: 'completed' })
+            .eq('id', session_id)
+        }
+
+        // Log round boundary events for audit + UI timelines.
+        await supabaseAdmin.from('live_events').insert([
+          {
+            session_id,
+            event_type: 'round_completed',
+            actor: 'interviewer',
+            payload: { round_number: activeRoundNumber, ended_by: 'interviewer', ended_at: now }
+          },
+          ...(nextRoundCandidate
+            ? [
+                {
+                  session_id,
+                  event_type: 'round_started',
+                  actor: 'interviewer',
+                  payload: { round_number: nextRoundCandidate.round_number, started_by: 'interviewer', started_at: now }
+                }
+              ]
+            : [])
+        ])
+      }
+    }
+
+    if (action_type === 'role_widget_config') {
+      const { data: scopePackage, error: scopeError } = await supabaseAdmin
+        .from('interview_scope_packages')
+        .select('id,simulation_payloads')
+        .eq('session_id', session_id)
+        .single()
+
+      if (scopeError) throw scopeError
+
+      const simulationPayloads = scopePackage?.simulation_payloads || {}
+      const nextSimulationPayloads = {
+        ...simulationPayloads,
+        role_widget_config: {
+          role_family: payload?.role_family || null,
+          lanes: Array.isArray(payload?.lanes) ? payload.lanes : []
+        }
+      }
+
+      const { error: updateScopeError } = await supabaseAdmin
+        .from('interview_scope_packages')
+        .update({ simulation_payloads: nextSimulationPayloads })
+        .eq('id', scopePackage.id)
+
+      if (updateScopeError) throw updateScopeError
+    }
 
     if (action_type === 'manual_followup' && payload?.followup) {
       const { data: scores } = await supabaseAdmin

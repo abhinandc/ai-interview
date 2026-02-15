@@ -1,44 +1,52 @@
-'use client'
+"use client"
 
-import { useEffect, useRef, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import { SessionProvider, useSession } from '@/contexts/SessionContext'
-import { TaskSurface } from '@/components/TaskSurface'
-import { SidekickPanel } from '@/components/SidekickPanel'
-import { AlarmClock, TimerReset, ChevronRight, Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { Progress } from '@/components/ui/progress'
+import { useEffect, useMemo, useRef, useState } from "react"
+import { useParams } from "next/navigation"
+import {
+  CheckCircle2,
+  CircleDashed,
+  ShieldCheck,
+  Sparkles,
+  TimerReset,
+  Workflow
+} from "lucide-react"
+import { SessionProvider, useSession } from "@/contexts/SessionContext"
+import { TaskSurface } from "@/components/TaskSurface"
+import { SidekickPanel } from "@/components/SidekickPanel"
+import { RoleFlowHub } from "@/components/role-flow-hub"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
 
-function CandidateView() {
-  const { session, rounds, currentRound, loading } = useSession()
+function CandidateWorkspace() {
+  const { session, scopePackage, rounds, currentRound, loading } = useSession()
   const [timeLeft, setTimeLeft] = useState(0)
   const [endAt, setEndAt] = useState<number | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const autoSubmitFired = useRef(false)
-  const router = useRouter()
 
-  // Auto-start Round 1 if session is scheduled
   useEffect(() => {
     const autoStartRound = async () => {
       if (
-        session?.status === 'scheduled' &&
-        currentRound?.status === 'pending' &&
+        session?.status === "scheduled" &&
+        currentRound?.status === "pending" &&
         currentRound.round_number === 1
       ) {
-        const response = await fetch('/api/round/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            session_id: session.id,
-            round_number: 1
-          })
+        const response = await fetch("/api/round/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: session.id, round_number: 1 })
         })
+
         if (response.ok) {
           const updatedRound = await response.json()
           const durationMinutes = Number(updatedRound?.duration_minutes || currentRound.duration_minutes || 0)
           const startedAt = updatedRound?.started_at
             ? new Date(updatedRound.started_at).getTime()
             : Date.now()
+
           const nextEndAt = startedAt + durationMinutes * 60 * 1000
           setEndAt(nextEndAt)
           setTimeLeft(Math.max(0, Math.ceil((nextEndAt - Date.now()) / 1000)))
@@ -46,12 +54,12 @@ function CandidateView() {
         }
       }
     }
-    autoStartRound()
-  }, [session?.id, session?.status, currentRound?.status, currentRound?.round_number, currentRound?.duration_minutes])
 
-  // Initialize timer when round starts
+    void autoStartRound()
+  }, [session?.id, session?.status, currentRound?.round_number, currentRound?.status, currentRound?.duration_minutes])
+
   useEffect(() => {
-    if (currentRound?.status === 'active') {
+    if (currentRound?.status === "active") {
       const durationMinutes = Number(currentRound.duration_minutes || 0)
       const startedAt = currentRound.started_at
         ? new Date(currentRound.started_at).getTime()
@@ -61,9 +69,8 @@ function CandidateView() {
       setTimeLeft(Math.max(0, Math.ceil((nextEndAt - Date.now()) / 1000)))
       autoSubmitFired.current = false
     }
-  }, [currentRound?.round_number, currentRound?.status, currentRound?.started_at, currentRound?.duration_minutes])
+  }, [currentRound?.round_number, currentRound?.status, currentRound?.duration_minutes, currentRound?.started_at])
 
-  // Countdown timer
   useEffect(() => {
     if (!endAt) return
 
@@ -72,215 +79,196 @@ function CandidateView() {
       setTimeLeft(remaining)
       if (remaining === 0 && currentRound && !autoSubmitFired.current) {
         autoSubmitFired.current = true
-        handleAutoSubmit()
+        void handleSubmit(true)
       }
     }
 
     tick()
-    const timer = setInterval(tick, 1000)
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [endAt, currentRound?.round_number])
 
-    return () => clearInterval(timer)
-  }, [endAt, currentRound?.id])
+  const handleSubmit = async (auto = false) => {
+    if (!session || !currentRound || submitting) return
+    setSubmitting(true)
 
-  const handleAutoSubmit = async () => {
-    if (!currentRound || !session) return
-    // Complete round when time expires
-    await fetch(`/api/round/complete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: session.id,
-        round_number: currentRound.round_number
-      })
-    })
-  }
-
-  const handleSubmit = async () => {
-    if (!currentRound || !session) return
-
-    // Complete current round
-    await fetch(`/api/round/complete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    await fetch("/api/round/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         session_id: session.id,
         round_number: currentRound.round_number
       })
     })
 
-    // Check if there's a next round
-    const nextRound = rounds.find(r => r.round_number === currentRound.round_number + 1)
+    const nextRound = rounds.find((round) => round.round_number === currentRound.round_number + 1)
+
     if (nextRound) {
-      // Start next round
-      await fetch(`/api/round/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await fetch("/api/round/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: session.id,
           round_number: nextRound.round_number
         })
       })
     }
+
+    setSubmitting(false)
+
+    if (auto) {
+      setTimeLeft(0)
+    }
   }
+
+  const formattedTime = useMemo(() => {
+    const minutes = Math.floor(timeLeft / 60)
+    const seconds = timeLeft % 60
+    return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`
+  }, [timeLeft])
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-skywash-600 mx-auto" />
-          <p className="mt-4 text-sm text-ink-500">Loading session...</p>
+      <main className="flex min-h-screen items-center justify-center">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <CircleDashed className="h-4 w-4 animate-spin" />
+          Loading candidate workspace...
         </div>
-      </div>
+      </main>
     )
   }
 
   if (!session || !currentRound) {
     return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <p className="text-lg font-semibold text-ink-900">Session not found</p>
-          <p className="mt-2 text-sm text-ink-500">This session may not exist or has ended.</p>
-        </div>
-      </div>
+      <main className="flex min-h-screen items-center justify-center px-4">
+        <Card className="max-w-lg">
+          <CardHeader>
+            <CardTitle>Session unavailable</CardTitle>
+            <CardDescription>
+              No active session was found. Return to candidate login and re-enter using your invite email.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </main>
     )
   }
 
-  if (session.status === 'completed' || session.status === 'aborted') {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-center">
-          <p className="text-lg font-semibold text-ink-900">Session Complete</p>
-          <p className="mt-2 text-sm text-ink-500">Thank you for participating. You may now close this window.</p>
-        </div>
-      </div>
-    )
-  }
+  const currentRoundNumber = currentRound.round_number || 1
+  const progress = ((currentRoundNumber - 1) / Math.max(rounds.length, 1)) * 100
 
-  // Calculate current round number from active round
-  const currentRoundNumber = currentRound?.round_number || 1
-  const progress = ((currentRoundNumber - 1) / rounds.length) * 100
-
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-
-  const formatRoundType = (roundType?: string) => {
-    if (!roundType) return 'ROUND'
-    if (roundType === 'voice') return 'LIVE CONVERSATION'
-    return roundType.toUpperCase()
-  }
-
-  // Get candidate and job info from session (added by API)
-  const candidateName = (session as any).candidate?.name || 'Candidate'
-  const jobTitle = (session as any).job?.title || 'Position'
-  const jobLevel = (session as any).job?.level_band || 'mid'
+  const candidateName = (session as any).candidate?.name || "Candidate"
+  const roleName = (session as any).job?.title || "Assessment"
+  const roleTrack = (session as any).job?.track || "sales"
+  const configuredRoleWidgets = (scopePackage as any)?.simulation_payloads?.role_widget_config?.lanes
+  const configuredRoleFamily = (scopePackage as any)?.simulation_payloads?.role_widget_config?.role_family || roleTrack
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#eef6ff_0%,#f7f7fb_35%,#fefefe_100%)] px-6 py-10">
-      <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[2fr,1fr]">
-        <section className="space-y-6">
-          {/* Header */}
-          <header className="rounded-3xl border border-ink-100 bg-white/90 px-6 py-5 shadow-panel backdrop-blur">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-ink-200 bg-ink-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink-500">
-                    Live Interview
-                  </span>
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600">
-                    {session.status}
-                  </span>
-                </div>
-                <h1 className="font-display text-2xl text-ink-900">{jobTitle}</h1>
-                <p className="text-sm text-ink-500">
-                  {candidateName} • Level {jobLevel}
-                </p>
-              </div>
-              <div className="flex items-center gap-3 rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm shadow-sm">
-                <AlarmClock className="h-4 w-4 text-skywash-600" />
-                <span className="font-semibold text-lg">{formatTime(timeLeft)}</span>
-                <span className="text-ink-500">remaining</span>
-              </div>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 text-xs text-ink-500">
-                <TimerReset className="h-4 w-4 text-ink-500" />
-                <span>Round {currentRoundNumber} of {rounds.length}</span>
-              </div>
-              <Progress value={progress} className="flex-1" />
-              <span className="rounded-full border border-ink-200 bg-ink-50 px-3 py-1 text-xs text-ink-600">
-                {formatRoundType(currentRound.round_type)} • {currentRound.duration_minutes} min
-              </span>
-            </div>
-          </header>
+    <main className="surface-grid min-h-screen px-5 py-8 md:px-10 md:py-10">
+      <div className="mx-auto max-w-[1880px] space-y-7">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-2">
+            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">OneOrigin Candidate Workspace</p>
+            <h1 className="text-4xl font-semibold leading-tight tracking-[-0.01em] md:text-5xl">{roleName}</h1>
+            <p className="text-sm tracking-[0.01em] text-muted-foreground">{candidateName}</p>
+          </div>
 
-          {/* Task Surface */}
-          <Card className="animate-rise-in border-ink-100 bg-white/90 shadow-panel">
-            <CardContent className="space-y-6 pt-6">
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">
-                    <Sparkles className="h-4 w-4 text-skywash-600" />
-                    Round Brief
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="capitalize">{session.status}</Badge>
+            <ThemeToggle />
+          </div>
+        </header>
+
+        <div className="grid gap-7 xl:grid-cols-[360px_minmax(0,1fr)] 2xl:gap-10">
+          <aside className="order-2 xl:order-none">
+            <RoleFlowHub lanes={configuredRoleWidgets} roleFamily={configuredRoleFamily} />
+          </aside>
+
+          <section className="order-1 xl:order-none">
+            <Card className="glass-surface relative overflow-hidden rounded-[28px] border-0 bg-transparent shadow-none">
+              <div className="glass-glow" aria-hidden="true" />
+
+              <CardHeader className="relative z-10 space-y-6 p-7 md:p-10">
+                <div className="flex flex-wrap items-start justify-between gap-6">
+                  <div className="space-y-3">
+                    <CardDescription className="uppercase tracking-[0.2em]">Center Canvas</CardDescription>
+                    <CardTitle className="text-3xl leading-[1.1] tracking-tight md:text-5xl">
+                      Round {String(currentRoundNumber).padStart(2, "0")}
+                      <span className="text-muted-foreground"> / {String(rounds.length).padStart(2, "0")}</span>
+                    </CardTitle>
+                    <p className="max-w-3xl text-sm leading-7 tracking-[0.01em] text-muted-foreground md:text-base">
+                      {currentRound.title}
+                    </p>
                   </div>
-                  <h2 className="font-display text-xl text-ink-900">{currentRound.title}</h2>
-                  <p className="text-sm text-ink-500">{currentRound.prompt}</p>
+
+                  <div className="grid w-full gap-3 sm:w-auto sm:grid-cols-2">
+                    <div className="rounded-2xl border border-border/60 bg-background/40 px-5 py-4 text-right backdrop-blur">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Progress</p>
+                      <p className="text-4xl font-bold leading-none tracking-tight">{Math.round(progress)}%</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-border/60 bg-primary/10 px-5 py-4 text-right backdrop-blur">
+                      <p className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Time</p>
+                      <p className="text-4xl font-bold leading-none tracking-tight text-primary md:text-5xl">{formattedTime}</p>
+                    </div>
+                  </div>
                 </div>
-                <div className="hidden min-w-[160px] rounded-2xl border border-ink-100 bg-ink-50/60 px-4 py-3 text-xs text-ink-600 lg:block">
-                  Stay focused on constraints and keep responses crisp. The interviewer is monitoring live.
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Live session completion</span>
+                    <span>{Math.round(progress)}%</span>
+                  </div>
+                  <Progress value={progress} />
                 </div>
-              </div>
-              <TaskSurface round={currentRound} />
-              <div className="flex flex-wrap gap-3">
-                <Button
-                  size="sm"
-                  onClick={handleSubmit}
-                  disabled={session.status !== 'live'}
-                >
-                  Submit & Next
-                  <ChevronRight className="ml-1 h-4 w-4" />
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl border border-border/60 bg-background/35 p-4 backdrop-blur">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Flow</p>
+                    <p className="mt-1 flex items-center gap-1 text-sm font-medium">
+                      <Workflow className="h-4 w-4 text-primary" /> Agentic widgets active
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border/60 bg-background/35 p-4 backdrop-blur">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Integrity</p>
+                    <p className="mt-1 flex items-center gap-1 text-sm font-medium">
+                      <ShieldCheck className="h-4 w-4 text-emerald-500" /> Policy tracking on
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border/60 bg-background/35 p-4 backdrop-blur">
+                    <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Assist</p>
+                    <p className="mt-1 flex items-center gap-1 text-sm font-medium">
+                      <Sparkles className="h-4 w-4 text-amber-500" /> Astra ready at edge
+                    </p>
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="relative z-10 px-7 pb-6 md:px-10">
+                <div className="rounded-2xl border border-border/60 bg-background/35 p-6 backdrop-blur md:p-8">
+                  <TaskSurface round={currentRound} />
+                </div>
+              </CardContent>
+
+              <CardFooter className="relative z-10 flex flex-wrap items-center justify-between gap-3 px-7 pb-7 md:px-10 md:pb-10">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <TimerReset className="h-4 w-4" />
+                  Responses are evaluated live and auto-submitted when timer expires.
+                </div>
+
+                <Button onClick={() => handleSubmit(false)} disabled={submitting} size="lg" className="min-w-44 rounded-2xl">
+                  <CheckCircle2 className="h-4 w-4" />
+                  {submitting ? "Submitting..." : "Submit & Next"}
                 </Button>
-              </div>
-              <p className="text-xs text-ink-500">
-                Responses are evaluated live. Auto-submit occurs if the timer reaches zero.
-              </p>
-            </CardContent>
-          </Card>
-        </section>
+              </CardFooter>
 
-        {/* Sidebar */}
-        <aside className="space-y-6">
-          <SidekickPanel role={jobTitle} />
-
-          {/* Session Status */}
-          <Card className="border-ink-100 bg-white/90 shadow-panel">
-            <CardContent className="space-y-3 pt-6">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-ink-600">Session Status</span>
-                <span className="font-semibold capitalize">{session.status}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-ink-600">Round Type</span>
-                <span className="text-ink-500 uppercase">{formatRoundType(currentRound.round_type)}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-ink-600">Duration</span>
-                <span className="text-ink-500">{currentRound.duration_minutes} min</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-ink-600">Auto-save</span>
-                <span className="text-ink-500">Every 30 seconds</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-ink-600">Audit Log</span>
-                <span className="text-ink-500">Enabled</span>
-              </div>
-            </CardContent>
-          </Card>
-        </aside>
+              <div className="glass-highlight" aria-hidden="true" />
+              <div className="glass-inner-shadow" aria-hidden="true" />
+            </Card>
+          </section>
+        </div>
       </div>
+
+      <SidekickPanel role={roleName} />
     </main>
   )
 }
@@ -291,7 +279,7 @@ export default function CandidatePage() {
 
   return (
     <SessionProvider sessionId={sessionId}>
-      <CandidateView />
+      <CandidateWorkspace />
     </SessionProvider>
   )
 }

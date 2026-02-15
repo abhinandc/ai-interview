@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { MessageSquare, Send, CheckCircle2 } from 'lucide-react'
+import { MessageSquare, Send, CheckCircle2, Circle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useSession } from '@/contexts/SessionContext'
 import type { Round } from '@/lib/types/database'
 
@@ -30,12 +31,11 @@ export function VoiceCallUI({ round }: { round: Round }) {
 
   if (!session) return null
 
-  // Auto-scroll messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [messages])
+  }, [messages, loading])
 
   const startChat = async () => {
     setChatActive(true)
@@ -73,7 +73,6 @@ export function VoiceCallUI({ round }: { round: Round }) {
       if (data.persona_state) setPersonaState(data.persona_state)
       if (data.metrics) setConversationMetrics(data.metrics)
 
-      // Save as conversation start
       await fetch('/api/artifact/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -98,7 +97,6 @@ export function VoiceCallUI({ round }: { round: Round }) {
   const endChat = async () => {
     setChatActive(false)
 
-    // Save full conversation as artifact
     await fetch('/api/artifact/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -126,23 +124,22 @@ export function VoiceCallUI({ round }: { round: Round }) {
       timestamp: new Date().toISOString()
     }
 
-    setMessages(prev => [...prev, candidateMessage])
+    setMessages((prev) => [...prev, candidateMessage])
     setDraft('')
     setLoading(true)
 
     try {
-          // Call AI prospect API
-          const response = await fetch('/api/ai/prospect', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              session_id: session.id,
-              round_number: round.round_number,
-              message: draft,
-              conversation_history: messages,
-              persona_state: personaState,
-              metrics: conversationMetrics
-            })
+      const response = await fetch('/api/ai/prospect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: session.id,
+          round_number: round.round_number,
+          message: draft,
+          conversation_history: messages,
+          persona_state: personaState,
+          metrics: conversationMetrics
+        })
       })
 
       const data = await response.json()
@@ -158,12 +155,10 @@ export function VoiceCallUI({ round }: { round: Round }) {
         timestamp: new Date().toISOString()
       }
 
-      setMessages(prev => [...prev, prospectMessage])
+      setMessages((prev) => [...prev, prospectMessage])
 
-      // Update persona state and metrics
       if (data.persona_state) setPersonaState(data.persona_state)
       if (data.metrics) setConversationMetrics(data.metrics)
-
     } catch (error) {
       console.error('Error sending message:', error)
     } finally {
@@ -171,187 +166,179 @@ export function VoiceCallUI({ round }: { round: Round }) {
     }
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      sendMessage()
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      void sendMessage()
     }
   }
 
-  const getPersonaColor = () => {
-    switch (personaState) {
-      case 'interested':
-        return 'bg-signal-500'
-      case 'skeptical':
-        return 'bg-caution-500'
-      default:
-        return 'bg-ink-300'
+  const personaMeta = {
+    neutral: {
+      label: 'Neutral',
+      variant: 'outline' as const,
+      helper: 'Prospect is listening. Start your discovery questions.',
+      dotClass: 'bg-muted-foreground'
+    },
+    skeptical: {
+      label: 'Skeptical',
+      variant: 'secondary' as const,
+      helper: 'Prospect is skeptical. Address concerns with evidence and confidence.',
+      dotClass: 'bg-amber-500'
+    },
+    interested: {
+      label: 'Interested',
+      variant: 'default' as const,
+      helper: 'Prospect is interested. Continue building concrete business value.',
+      dotClass: 'bg-emerald-500'
     }
-  }
+  }[personaState]
 
   return (
     <div className="space-y-4">
-      {/* Chat Controls */}
-      <div className="flex items-center justify-between rounded-2xl border border-ink-100 bg-white px-6 py-4">
-        <div className="flex items-center gap-3">
-          <div className={`h-3 w-3 rounded-full ${chatActive ? `animate-pulse ${getPersonaColor()}` : 'bg-ink-300'}`} />
-          <span className="text-sm font-semibold">
-            {chatActive ? 'Conversation in progress' : 'Ready to start'}
-          </span>
-        </div>
-
-        <Button
-          variant={chatActive ? 'default' : 'default'}
-          size="sm"
-          onClick={chatActive ? endChat : startChat}
-          className={chatActive ? 'bg-signal-500 hover:bg-signal-600' : ''}
-        >
-          {chatActive ? (
-            <>
-              <MessageSquare className="mr-2 h-4 w-4" />
-              End Conversation
-            </>
-          ) : (
-            <>
-              <MessageSquare className="mr-2 h-4 w-4" />
-              Start Conversation
-            </>
-          )}
-        </Button>
-      </div>
-
-      {/* Persona State Indicator */}
-      {chatActive && (
-        <div className="flex items-center gap-2 rounded-2xl bg-skywash-50 px-4 py-3">
-          <Badge tone="sky">{personaState.toUpperCase()}</Badge>
-          <span className="text-sm text-ink-600">
-            {personaState === 'neutral' && 'Prospect is listening. Start your discovery questions.'}
-            {personaState === 'skeptical' && 'Prospect is skeptical. Address concerns with confidence.'}
-            {personaState === 'interested' && 'Prospect is interested! Continue building value.'}
-          </span>
-        </div>
-      )}
-
-      {/* Conversation Messages */}
-      {chatActive && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold">Live Conversation</h3>
-          <div
-            ref={scrollRef}
-            className="max-h-96 space-y-4 overflow-y-auto rounded-2xl border border-ink-100 bg-white px-4 py-4"
+      <Card>
+        <CardHeader className="pb-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle className="text-base">Live Persona Conversation</CardTitle>
+              <CardDescription>
+                Simulated prospect chat. Discovery quality, objection handling, and value framing are scored.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs">
+              <span className={`h-2 w-2 rounded-full ${chatActive ? personaMeta.dotClass : 'bg-muted-foreground/60'}`} />
+              <span>{chatActive ? 'Conversation live' : 'Ready to start'}</span>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Button
+            size="sm"
+            variant={chatActive ? 'destructive' : 'default'}
+            onClick={chatActive ? endChat : startChat}
+            disabled={loading}
           >
-            {messages.map((message, index) => {
-              const isCandidate = message.speaker === 'candidate'
-              return (
-                <div
-                  key={index}
-                  className={`flex items-end gap-3 ${isCandidate ? 'justify-end' : 'justify-start'}`}
-                >
-                  {!isCandidate && (
-                    <div
-                      aria-label="Prospect"
-                      className="flex h-9 w-9 items-center justify-center rounded-full bg-skywash-100"
-                    >
-                      <span className="h-2.5 w-2.5 rounded-full bg-skywash-600" />
-                    </div>
-                  )}
-                  <div className={`max-w-[75%] ${isCandidate ? 'text-right' : 'text-left'}`}>
-                    <div
-                      className={`rounded-2xl px-4 py-3 text-sm ${
-                        isCandidate
-                          ? 'bg-ink-900 text-white'
-                          : 'bg-skywash-50 text-ink-800'
-                      }`}
-                    >
-                      {message.text}
-                    </div>
-                    <div className="mt-1 text-xs text-ink-500">
-                      {isCandidate ? 'You' : 'Prospect'} • {new Date(message.timestamp).toLocaleTimeString()}
-                    </div>
-                  </div>
-                  {isCandidate && (
-                    <div
-                      aria-label="You"
-                      className="flex h-9 w-9 items-center justify-center rounded-full bg-ink-900"
-                    >
-                      <span className="h-2.5 w-2.5 rounded-full bg-white" />
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-            {loading && (
-              <div className="flex items-end gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-skywash-100">
-                <span className="h-2.5 w-2.5 rounded-full bg-skywash-600" />
-              </div>
-                <div className="rounded-2xl bg-skywash-50 px-4 py-3">
-                  <p className="text-sm text-ink-600">Prospect is typing...</p>
-                </div>
-              </div>
-            )}
-          </div>
+            <MessageSquare className="h-4 w-4" />
+            {chatActive ? 'End Conversation' : 'Start Conversation'}
+          </Button>
+        </CardContent>
+      </Card>
 
-          {/* Message Input */}
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="Type your message..."
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={loading}
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={sendMessage}
-              disabled={loading || !draft.trim()}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+      {chatActive && (
+        <Card>
+          <CardContent className="flex items-center gap-3 pt-6">
+            <Badge variant={personaMeta.variant}>{personaMeta.label}</Badge>
+            <p className="text-sm text-muted-foreground">{personaMeta.helper}</p>
+          </CardContent>
+        </Card>
       )}
 
-      {/* Requirements Checklist */}
-      <div className="rounded-2xl border border-ink-100 bg-white px-4 py-4">
-        <h3 className="mb-3 text-sm font-semibold">Round Requirements</h3>
-        <ul className="space-y-2 text-sm">
-          <li className="flex items-center gap-2">
-            <div className={`h-4 w-4 rounded border flex items-center justify-center ${conversationMetrics.questionsAsked >= 5 ? 'bg-signal-500 border-signal-500' : 'border-ink-300'}`}>
-              {conversationMetrics.questionsAsked >= 5 && <CheckCircle2 className="h-3 w-3 text-white" />}
-            </div>
-            <span>Ask at least 5 discovery questions ({conversationMetrics.questionsAsked}/5)</span>
-          </li>
-          <li className="flex items-center gap-2">
-            <div className={`h-4 w-4 rounded border flex items-center justify-center ${conversationMetrics.valueQuantified ? 'bg-signal-500 border-signal-500' : 'border-ink-300'}`}>
-              {conversationMetrics.valueQuantified && <CheckCircle2 className="h-3 w-3 text-white" />}
-            </div>
-            <span>Quantify value proposition</span>
-          </li>
-          <li className="flex items-center gap-2">
-            <div className={`h-4 w-4 rounded border flex items-center justify-center ${conversationMetrics.objectionsHandled >= 3 ? 'bg-signal-500 border-signal-500' : 'border-ink-300'}`}>
-              {conversationMetrics.objectionsHandled >= 3 && <CheckCircle2 className="h-3 w-3 text-white" />}
-            </div>
-            <span>Handle at least 3 objections ({conversationMetrics.objectionsHandled}/3)</span>
-          </li>
-          <li className="flex items-center gap-2">
-            <div className="h-4 w-4 rounded border border-ink-300 flex items-center justify-center">
-              <CheckCircle2 className="h-3 w-3 text-transparent" />
-            </div>
-            <span>Professional closing attempt</span>
-          </li>
-        </ul>
-      </div>
+      {chatActive && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Conversation Stream</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div ref={scrollRef} className="max-h-96 space-y-4 overflow-y-auto rounded-lg border bg-muted/15 p-4">
+              {messages.map((message, index) => {
+                const isCandidate = message.speaker === 'candidate'
+                return (
+                  <div key={index} className={`flex items-end gap-2 ${isCandidate ? 'justify-end' : 'justify-start'}`}>
+                    {!isCandidate && (
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full border bg-background text-xs">
+                        P
+                      </div>
+                    )}
 
-      {/* Chat Instructions */}
+                    <div className={`max-w-[78%] ${isCandidate ? 'text-right' : 'text-left'}`}>
+                      <div
+                        className={`rounded-2xl px-4 py-2.5 text-sm ${
+                          isCandidate ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'
+                        }`}
+                      >
+                        {message.text}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {isCandidate ? 'You' : 'Prospect'} | {new Date(message.timestamp).toLocaleTimeString()}
+                      </div>
+                    </div>
+
+                    {isCandidate && (
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full border bg-primary text-xs text-primary-foreground">
+                        Y
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+
+              {loading && (
+                <div className="rounded-xl border bg-background px-3 py-2 text-sm text-muted-foreground">
+                  Prospect is typing...
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Input
+                placeholder="Type your message..."
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={handleKeyDown}
+                disabled={loading}
+              />
+              <Button size="icon" variant="outline" onClick={sendMessage} disabled={loading || !draft.trim()}>
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Round Requirements</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2 text-sm">
+            <li className="flex items-center gap-2">
+              {conversationMetrics.questionsAsked >= 5 ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              ) : (
+                <Circle className="h-4 w-4 text-muted-foreground" />
+              )}
+              Ask at least 5 discovery questions ({conversationMetrics.questionsAsked}/5)
+            </li>
+            <li className="flex items-center gap-2">
+              {conversationMetrics.valueQuantified ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              ) : (
+                <Circle className="h-4 w-4 text-muted-foreground" />
+              )}
+              Quantify value proposition at least once
+            </li>
+            <li className="flex items-center gap-2">
+              {conversationMetrics.objectionsHandled >= 3 ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+              ) : (
+                <Circle className="h-4 w-4 text-muted-foreground" />
+              )}
+              Handle at least 3 objections ({conversationMetrics.objectionsHandled}/3)
+            </li>
+            <li className="flex items-center gap-2">
+              <Circle className="h-4 w-4 text-muted-foreground" />
+              Close with a clear next-step ask
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
       {!chatActive && (
-        <div className="rounded-2xl bg-skywash-50 px-4 py-4">
-          <p className="text-sm text-ink-700">
-            <strong>Instructions:</strong> This is a live text conversation with a prospect.
-            Conduct discovery, handle objections, and close for next steps. The prospect will raise objections and you may encounter curveballs during the conversation.
-          </p>
-        </div>
+        <Card>
+          <CardContent className="pt-6 text-sm text-muted-foreground">
+            Begin the conversation, lead discovery, handle objections, and close for a next step.
+          </CardContent>
+        </Card>
       )}
     </div>
   )

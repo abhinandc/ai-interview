@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Card, CardHeader } from '@/components/ui/card'
+import { ChevronRight, Loader2 } from 'lucide-react'
+import { ThemeToggle } from '@/components/theme-toggle'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 type SessionListItem = {
   id: string
   status: string
-  candidate?: { name?: string }
-  job?: { title?: string }
+  candidate?: { name?: string; email?: string }
+  job?: { title?: string; level_band?: string }
+  created_at?: string
 }
 
 export default function InterviewerPage() {
@@ -24,48 +29,82 @@ export default function InterviewerPage() {
       }
       setLoading(false)
     }
-    loadSessions()
+    void loadSessions()
   }, [])
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#eef6ff_0%,#f7f7fb_35%,#fefefe_100%)] px-6 py-10">
-      <div className="mx-auto w-full max-w-5xl">
-        <Card className="bg-white/90">
-          <CardHeader className="space-y-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">
-                Interviewer Console
-              </p>
-              <h1 className="text-2xl font-semibold text-ink-900">Active Sessions</h1>
-              <p className="text-sm text-ink-500">
-                Select a session to open the live Gate Panel and transcript.
-              </p>
-            </div>
+    <main className="surface-grid min-h-screen px-4 py-8 md:px-8">
+      <div className="mx-auto w-full max-w-5xl space-y-5">
+        <header className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Interviewer</p>
+            <h1 className="text-2xl font-semibold">Live Assessment Sessions</h1>
+            <p className="text-sm text-muted-foreground">Open a live session for transcript, controls, and gate panel.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/">Home</Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/admin">Admin</Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/about-oneorigin">About</Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <a href="https://www.oneorigin.us/" target="_blank" rel="noreferrer">
+                Website
+              </a>
+            </Button>
+            <ThemeToggle />
+          </div>
+        </header>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Active and Recent Sessions</CardTitle>
+            <CardDescription>Newest sessions appear first.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
             {loading && (
-              <div className="rounded-2xl bg-ink-50 px-4 py-3 text-sm text-ink-500">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
                 Loading sessions...
               </div>
             )}
+
             {!loading && sessions.length === 0 && (
-              <div className="rounded-2xl bg-ink-50 px-4 py-3 text-sm text-ink-500">
-                No sessions found.
-              </div>
+              <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">No sessions found.</div>
             )}
-            <div className="flex flex-col gap-3">
-              {sessions.map((session) => (
+
+            {sessions.map((session) => {
+              const statusVariant =
+                session.status === 'live' ? 'default' : session.status === 'completed' ? 'secondary' : 'outline'
+
+              return (
                 <Link
                   key={session.id}
                   href={`/interviewer/${session.id}`}
-                  className="rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm transition hover:border-skywash-300"
+                  className="flex items-center justify-between rounded-lg border p-4 transition hover:bg-muted/30"
                 >
-                  <div className="font-semibold text-ink-900">
-                    {session.candidate?.name || 'Candidate'} • {session.job?.title || 'Role'}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium">
+                        {session.candidate?.name || 'Candidate'} | {session.job?.title || 'Role'}
+                      </p>
+                      <Badge variant={statusVariant} className="capitalize">
+                        {session.status}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {session.candidate?.email || 'No email'} | Level {session.job?.level_band || 'n/a'}
+                    </p>
                   </div>
-                  <div className="text-xs text-ink-500">Session status: {session.status}</div>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
                 </Link>
-              ))}
-            </div>
-          </CardHeader>
+              )
+            })}
+          </CardContent>
         </Card>
       </div>
     </main>

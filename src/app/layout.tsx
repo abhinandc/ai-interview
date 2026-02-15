@@ -1,34 +1,35 @@
-import type { Metadata } from "next";
-import { Crimson_Pro, Space_Grotesk } from "next/font/google";
-import "./globals.css";
+import type { Metadata } from "next"
+import { Inter } from "next/font/google"
+import "./globals.css"
+import { GlassFooter } from "@/components/glass-footer"
+import { ThemeProvider } from "@/components/theme-provider"
 
-const displayFont = Crimson_Pro({
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["400", "600", "700"]
-});
-
-const bodyFont = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  weight: ["400", "500", "600", "700"]
-});
+  variable: "--font-inter",
+  display: "swap"
+})
 
 export const metadata: Metadata = {
-  title: "Interview Platform",
-  description: "Live interview platform with AI-assisted evaluation and real-time monitoring."
-};
+  title: "OneOrigin Live Assessment",
+  description: "OneOrigin Inc. live candidate assessment with AI sidekick, interviewer controls, and admin analytics."
+}
 
 export default function RootLayout({
   children
-}: {
-  children: React.ReactNode;
-}) {
+}: Readonly<{
+  children: React.ReactNode
+}>) {
   return (
-    <html lang="en" className={`${displayFont.variable} ${bodyFont.variable}`}>
-      <body className="min-h-screen bg-hero-grid text-ink-900">
-        {children}
+    <html lang="en" suppressHydrationWarning className={inter.variable}>
+      <body className="min-h-screen bg-background font-sans text-foreground antialiased">
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
+          <div className="pb-20">
+            {children}
+          </div>
+          <GlassFooter />
+        </ThemeProvider>
       </body>
     </html>
-  );
+  )
 }

@@ -2,7 +2,7 @@
 
 import { createContext, useContext, ReactNode } from 'react'
 import { useRealtimeSession } from '@/hooks/useRealtimeSession'
-import type { InterviewSession, Round, Score, Event, InterviewScopePackage } from '@/lib/types/database'
+import type { Artifact, InterviewSession, Round, Score, Event, InterviewScopePackage } from '@/lib/types/database'
 
 interface SessionContextValue {
   session: InterviewSession | null
@@ -11,7 +11,9 @@ interface SessionContextValue {
   currentRound: Round | null
   scores: Score[]
   events: Event[]
+  artifacts: Artifact[]
   loading: boolean
+  refresh: () => Promise<void>
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined)

@@ -1,9 +1,17 @@
 import OpenAI from 'openai'
 import { supabaseAdmin } from '@/lib/supabase/server'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
+let openaiClient: OpenAI | null = null
+
+function getOpenAIClient() {
+  if (openaiClient) return openaiClient
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not configured')
+  }
+  openaiClient = new OpenAI({ apiKey })
+  return openaiClient
+}
 
 export interface ScoringDimension {
   name: string
@@ -99,7 +107,7 @@ Rules:
 - Return JSON: {"followups": ["Q1", "Q2", ...]}`
 
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
@@ -161,7 +169,7 @@ Be strict and evidence-based. Only award points where there is clear evidence.
 If you cannot provide evidence, return score 0 and an empty evidence array.`
 
     try {
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAIClient().chat.completions.create({
         model: 'gpt-4o',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,

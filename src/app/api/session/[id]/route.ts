@@ -58,6 +58,14 @@ export async function GET(
       .eq('session_id', sessionId)
       .order('created_at', { ascending: false })
 
+    // Get related artifacts (including optional resume docs)
+    const { data: artifacts } = await supabaseAdmin
+      .from('artifacts')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: false })
+      .limit(50)
+
     return NextResponse.json({
       session: {
         ...session,
@@ -67,7 +75,8 @@ export async function GET(
       scopePackage,
       rounds,
       events,
-      scores
+      scores,
+      artifacts: artifacts || []
     })
   } catch (error: any) {
     console.error('Session fetch error:', error)

@@ -2,14 +2,19 @@ import { NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { SALES_SIDEKICK_POLICY, enforceSidekickPolicy } from '@/lib/ai/sidekick-policy'
+import { decryptModelApiKey } from '@/lib/ai/model-registry-secrets'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
+function getDefaultOpenAIKey() {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not configured')
+  }
+  return apiKey
+}
 
 export async function POST(request: Request) {
   try {
-    const { session_id, round_id, query, history } = await request.json()
+    const { session_id, round_id, query, history, model_key, purpose } = await request.json()
 
     if (!session_id || !query) {
       return NextResponse.json(
@@ -43,12 +48,50 @@ export async function POST(request: Request) {
       })
     }
 
+    const startedAt = Date.now()
+
+    const requestedModelKey = typeof model_key === 'string' && model_key.trim() ? model_key.trim() : null
+    const requestedPurpose = typeof purpose === 'string' && purpose.trim() ? purpose.trim() : 'candidate_sidekick'
+
+    let effectiveModel = requestedModelKey || 'gpt-4o'
+    let baseURL: string | undefined = undefined
+    let apiKey: string = getDefaultOpenAIKey()
+
+    if (requestedModelKey) {
+      const { data: registryRow, error: registryError } = await supabaseAdmin
+        .from('model_registry')
+        .select('model_key,provider,purpose,edgeadmin_endpoint,api_key_ciphertext,is_active')
+        .eq('model_key', requestedModelKey)
+        .eq('purpose', requestedPurpose)
+        .eq('is_active', true)
+        .maybeSingle()
+
+      if (registryError) throw registryError
+
+      if (registryRow?.edgeadmin_endpoint) {
+        baseURL = registryRow.edgeadmin_endpoint
+      }
+
+      if (registryRow?.api_key_ciphertext) {
+        apiKey = decryptModelApiKey(registryRow.api_key_ciphertext)
+      }
+
+      if (registryRow?.model_key) {
+        effectiveModel = registryRow.model_key
+      }
+    }
+
+    const openaiClient = new OpenAI({ apiKey, baseURL })
+
     // Call OpenAI with policy-enforced system prompt
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+    const completion = await openaiClient.chat.completions.create({
+      model: effectiveModel,
       messages: [
         { role: 'system', content: SALES_SIDEKICK_POLICY.systemPrompt },
-        ...(history || []),
+        ...((history || []).map((message: any) => ({
+          role: message.role === 'assistant' ? 'assistant' : 'user',
+          content: String(message.content || '')
+        })) as any[]),
         { role: 'user', content: query }
       ],
       temperature: 0.7,
@@ -68,6 +111,10 @@ export async function POST(request: Request) {
         query_length: query.length,
         response_length: response.length,
         tokens_used: completion.usage?.total_tokens || 0,
+        model: effectiveModel,
+        base_url: baseURL || null,
+        purpose: requestedPurpose,
+        latency_ms: Date.now() - startedAt,
         policy_enforced: {
           permissions: SALES_SIDEKICK_POLICY.permissions,
           restrictions: SALES_SIDEKICK_POLICY.restrictions
@@ -78,7 +125,13 @@ export async function POST(request: Request) {
     return NextResponse.json({
       response,
       policy: SALES_SIDEKICK_POLICY,
-      remaining_queries: SALES_SIDEKICK_POLICY.maxQueries - (logs?.length || 0) - 1
+      remaining_queries: SALES_SIDEKICK_POLICY.maxQueries - (logs?.length || 0) - 1,
+      meta: {
+        model: effectiveModel,
+        latency_ms: Date.now() - startedAt,
+        thinking: query.toLowerCase().includes('think'),
+        tools: []
+      }
     })
   } catch (error: any) {
     console.error('Sidekick error:', error)

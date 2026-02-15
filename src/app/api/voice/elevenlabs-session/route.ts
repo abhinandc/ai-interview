@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { renderPromptTemplate } from '@/lib/ai/prompt-renderer'
-import type { Persona, Scenario, VoiceRealtimeRoundConfig } from '@/lib/types/database'
+import type { Persona, Scenario, VoiceRealtimeRoundConfig, Round } from '@/lib/types/database'
 
 export async function POST(request: Request) {
   try {
@@ -36,14 +36,23 @@ export async function POST(request: Request) {
     }
 
     // Step 3: Find the voice-realtime round
-    const voiceRound = scopePackage.round_plan.find(
-      (r: any) => r.round_type === 'voice-realtime'
+    const voiceRound = (scopePackage.round_plan as Round[]).find(
+      (r) => r.round_type === 'voice-realtime'
     )
 
     if (!voiceRound) {
       return NextResponse.json(
         { error: 'No voice-realtime round found in session' },
         { status: 404 }
+      )
+    }
+
+    // Step 3.5: Validate round status to prevent duplicate agent creation
+    if (voiceRound.status !== 'pending') {
+      console.warn('Voice round is not in pending state:', voiceRound.status)
+      return NextResponse.json(
+        { error: 'Voice round is not in pending state or already started' },
+        { status: 400 }
       )
     }
 
@@ -154,6 +163,13 @@ export async function POST(request: Request) {
     console.log('📝 Rendered system prompt:', systemPrompt.substring(0, 200) + '...')
     console.log('📝 Rendered first message:', firstMessage)
 
+    // Step 6.5: Sanitize inputs to prevent API quota exhaustion or malicious content
+    const MAX_PROMPT_LENGTH = 10000
+    const MAX_FIRST_MESSAGE_LENGTH = 500
+
+    const sanitizedPrompt = systemPrompt.substring(0, MAX_PROMPT_LENGTH)
+    const sanitizedFirstMessage = firstMessage.substring(0, MAX_FIRST_MESSAGE_LENGTH)
+
     // Step 7: Create ElevenLabs agent dynamically
     const elevenLabsApiKey = process.env.ELEVENLABS_API_KEY
 
@@ -175,9 +191,9 @@ export async function POST(request: Request) {
         conversation_config: {
           agent: {
             prompt: {
-              prompt: systemPrompt
+              prompt: sanitizedPrompt
             },
-            first_message: firstMessage,
+            first_message: sanitizedFirstMessage,
             language: 'en'
           }
         }
@@ -216,8 +232,8 @@ export async function POST(request: Request) {
         persona_name: persona.name,
         scenario_id: scenario?.id || null,
         difficulty: difficultyLevel,
-        rendered_prompt_preview: systemPrompt.substring(0, 500),
-        first_message: firstMessage
+        rendered_prompt_preview: sanitizedPrompt.substring(0, 500),
+        first_message: sanitizedFirstMessage
       }
     })
 

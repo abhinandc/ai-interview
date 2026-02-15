@@ -255,10 +255,14 @@ export function useVoiceRealtime(config: VoiceRealtimeConfig) {
       // Use functional state update to access current batch without closure
       setTranscriptBatch((currentBatch) => {
         if (currentBatch.length > 0) {
-          sendTranscriptBatch(currentBatch)
-          return [] // Clear batch after sending
+          // Send but DON'T clear immediately - wait for success
+          sendTranscriptBatch(currentBatch).then(({ success }) => {
+            if (success) {
+              setTranscriptBatch([]) // Clear only on success
+            }
+          })
         }
-        return currentBatch
+        return currentBatch // Don't clear here - let the promise handler do it
       })
     }, BATCH_INTERVAL)
 

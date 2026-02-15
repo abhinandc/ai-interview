@@ -15,6 +15,10 @@ interface TranscriptItem {
   timestamp: number
 }
 
+// Batch sending configuration
+const BATCH_SIZE = 10 // Send every 10 messages
+const BATCH_INTERVAL = 30000 // Or every 30 seconds
+
 export function useVoiceRealtime(config: VoiceRealtimeConfig) {
   const [isConnected, setIsConnected] = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -22,8 +26,41 @@ export function useVoiceRealtime(config: VoiceRealtimeConfig) {
   const [transcript, setTranscript] = useState<TranscriptItem[]>([])
   const [error, setError] = useState<string | null>(null)
 
+  // Batch management state
+  const [transcriptBatch, setTranscriptBatch] = useState<TranscriptItem[]>([])
+  const batchTimerRef = useRef<NodeJS.Timeout | null>(null)
+
   const conversationRef = useRef<Conversation | null>(null)
   const audioStreamRef = useRef<MediaStream | null>(null)
+
+  // Send transcript batch to API
+  const sendTranscriptBatch = useCallback(
+    async (messages: TranscriptItem[]) => {
+      if (messages.length === 0) return { success: false }
+
+      try {
+        await fetch('/api/voice/transcript', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: config.sessionId,
+            round_number: 1,
+            messages: messages.map((m) => ({
+              role: m.role,
+              text: m.text,
+              timestamp: m.timestamp
+            }))
+          })
+        })
+        console.log(`📤 Sent ${messages.length} transcript messages to API`)
+        return { success: true }
+      } catch (err) {
+        console.error('Failed to send transcript batch:', err)
+        return { success: false }
+      }
+    },
+    [config.sessionId]
+  )
 
   // Connect to ElevenLabs Conversational AI via SDK
   const connect = useCallback(async () => {
@@ -99,6 +136,22 @@ export function useVoiceRealtime(config: VoiceRealtimeConfig) {
 
             setTranscript((prev) => [...prev, newItem])
 
+            // Add to batch for API sending
+            setTranscriptBatch((prev) => {
+              const newBatch = [...prev, newItem]
+
+              // Send if batch reaches size limit
+              if (newBatch.length >= BATCH_SIZE) {
+                sendTranscriptBatch(newBatch).then(({ success }) => {
+                  if (success) {
+                    setTranscriptBatch([]) // Only clear on success
+                  }
+                })
+              }
+
+              return newBatch
+            })
+
             // Publish to live_events
             supabase
               .from('live_events')
@@ -124,6 +177,22 @@ export function useVoiceRealtime(config: VoiceRealtimeConfig) {
             }
 
             setTranscript((prev) => [...prev, newItem])
+
+            // Add to batch for API sending
+            setTranscriptBatch((prev) => {
+              const newBatch = [...prev, newItem]
+
+              // Send if batch reaches size limit
+              if (newBatch.length >= BATCH_SIZE) {
+                sendTranscriptBatch(newBatch).then(({ success }) => {
+                  if (success) {
+                    setTranscriptBatch([]) // Only clear on success
+                  }
+                })
+              }
+
+              return newBatch
+            })
 
             // Publish to live_events
             supabase
@@ -156,10 +225,15 @@ export function useVoiceRealtime(config: VoiceRealtimeConfig) {
   }, [config, isConnecting, isConnected])
 
   // Disconnect and cleanup
-  const disconnect = useCallback(() => {
+  const disconnect = useCallback(async () => {
+    // Send any remaining batched messages
+    if (transcriptBatch.length > 0) {
+      await sendTranscriptBatch(transcriptBatch)
+    }
+
     cleanup()
     setIsConnected(false)
-  }, [])
+  }, [transcriptBatch, sendTranscriptBatch])
 
   const cleanup = () => {
     if (conversationRef.current) {
@@ -172,6 +246,24 @@ export function useVoiceRealtime(config: VoiceRealtimeConfig) {
       audioStreamRef.current = null
     }
   }
+
+  // Batch timer: send partial batches every 30 seconds
+  useEffect(() => {
+    if (!isConnected) return
+
+    const intervalId = setInterval(() => {
+      // Use functional state update to access current batch without closure
+      setTranscriptBatch((currentBatch) => {
+        if (currentBatch.length > 0) {
+          sendTranscriptBatch(currentBatch)
+          return [] // Clear batch after sending
+        }
+        return currentBatch
+      })
+    }, BATCH_INTERVAL)
+
+    return () => clearInterval(intervalId)
+  }, [isConnected, sendTranscriptBatch])
 
   // Subscribe to voice commands from interviewer
   useEffect(() => {

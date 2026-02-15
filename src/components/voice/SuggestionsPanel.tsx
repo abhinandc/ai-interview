@@ -1,15 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
-
-interface Suggestion {
-  id: string
-  text: string
-  category: 'context_injection' | 'curveball' | 'followup_question'
-  priority: 'low' | 'medium' | 'high' | 'critical'
-  dismissed: boolean
-  created_at: string
-}
+import type { Suggestion } from './types'
 
 interface SuggestionsPanelProps {
   suggestions: Suggestion[]

@@ -181,11 +181,17 @@ export interface Persona {
   id: string
   name: string
   role: string
+  blueprint: 'sales' | 'agentic_eng' | 'fullstack' | 'marketing' | 'implementation' | 'HR' | 'security'
+  difficulty: number  // 1-5
   company_context: string
   personality_traits: string[]
   communication_style: string
   objection_patterns: string[]
+  prompt_template: string
+  first_message_template: string
+  is_active?: boolean
   created_at?: string
+  updated_at?: string
 }
 
 // 14. Scenarios (Voice Realtime)
@@ -207,6 +213,7 @@ export interface VoiceCommand {
   session_id: string
   command_type: 'difficulty_change' | 'curveball_inject'
   payload: Record<string, any>
+  source?: 'manual' | 'ai_suggested'
   created_at: string
 }
 

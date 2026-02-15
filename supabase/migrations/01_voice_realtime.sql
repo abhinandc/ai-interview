@@ -22,6 +22,21 @@ CREATE TABLE IF NOT EXISTS personas (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Trigger function for updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+   NEW.updated_at = NOW();
+   RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Trigger for personas table
+CREATE TRIGGER update_personas_updated_at
+  BEFORE UPDATE ON personas
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
 -- ============================================
 -- SCENARIOS
 -- ============================================
@@ -89,3 +104,10 @@ CREATE INDEX IF NOT EXISTS idx_voice_commands_session
 
 CREATE INDEX IF NOT EXISTS idx_ai_assessments_session
   ON ai_assessments(session_id, round_number, created_at DESC);
+
+-- Foreign key indexes for interview_scope_packages
+CREATE INDEX IF NOT EXISTS idx_scope_packages_persona
+  ON interview_scope_packages(selected_persona_id);
+
+CREATE INDEX IF NOT EXISTS idx_scope_packages_scenario
+  ON interview_scope_packages(selected_scenario_id);

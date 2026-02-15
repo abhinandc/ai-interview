@@ -69,6 +69,40 @@ export function CodeEditorUI({ round }: { round: Round }) {
     scheduleSave(code, value)
   }
 
+  // Auto-save on timer expiry: submit final non-draft code
+  const codeRef = useRef(code)
+  codeRef.current = code
+  const languageRef = useRef(language)
+  languageRef.current = language
+
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.round_number !== round.round_number || !session?.id) return
+      if (!codeRef.current || codeRef.current === initialCode) return
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      await fetch('/api/artifact/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: session.id,
+          round_number: round.round_number,
+          artifact_type: 'code_response',
+          content: codeRef.current,
+          metadata: {
+            draft: false,
+            auto_saved: true,
+            language: languageRef.current,
+            line_count: codeRef.current.split(/\n/).length,
+            char_count: codeRef.current.length
+          }
+        })
+      }).catch(() => {})
+    }
+    window.addEventListener('round-auto-save', handler)
+    return () => window.removeEventListener('round-auto-save', handler)
+  }, [round.round_number, session?.id, initialCode])
+
   if (!session) return null
 
   return (

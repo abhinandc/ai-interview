@@ -835,6 +835,8 @@ function InterviewerView() {
 
   const sendAction = async (action_type: string, payload?: Record<string, any>) => {
     setSendingAction(action_type)
+    // Show immediate optimistic feedback
+    setActionNotice({ kind: 'success', message: `Sending: ${action_type.replace(/_/g, ' ')}...` })
     try {
       const response = await fetch('/api/interviewer/action', {
         method: 'POST',
@@ -859,7 +861,8 @@ function InterviewerView() {
       }
 
       setActionNotice({ kind: 'success', message: `Action applied: ${action_type.replace(/_/g, ' ')}` })
-      await refresh()
+      // Non-blocking refresh — real-time subscriptions handle live updates
+      refresh().catch(() => {})
       return { ok: true, data }
     } finally {
       setSendingAction(null)
@@ -867,49 +870,78 @@ function InterviewerView() {
   }
 
   const sendDecision = async (decision: 'proceed' | 'caution' | 'stop') => {
-    await sendAction('gate_decision', { decision })
+    setSendingAction(`gate_${decision}`)
+    setActionNotice({ kind: 'success', message: `Applying decision: ${decision}...` })
 
-    if (decision === 'caution') {
-      await refresh()
-      return
-    }
-
-    if (decision === 'stop') {
-      await fetch(`/api/session/${session.id}/status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'aborted', reason: 'interviewer_stop' })
-      })
-      await refresh()
-      return
-    }
-
-    const activeRound = (rounds || []).find((round) => round.status === 'active')
-    const nextRound = (rounds || []).find((round) => round.status === 'pending')
-
-    if (activeRound) {
-      await fetch('/api/round/complete', {
+    try {
+      // Fire gate_decision event (non-blocking — don't wait for full round-trip)
+      const actionPromise = fetch('/api/interviewer/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           session_id: session.id,
-          round_number: activeRound.round_number
+          action_type: 'gate_decision',
+          payload: { decision }
         })
-      })
-    }
+      }).catch(() => {})
 
-    if (nextRound) {
-      await fetch('/api/round/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: session.id,
-          round_number: nextRound.round_number
+      if (decision === 'caution') {
+        await actionPromise
+        setActionNotice({ kind: 'success', message: 'Caution noted.' })
+        refresh().catch(() => {})
+        return
+      }
+
+      if (decision === 'stop') {
+        // Fire both in parallel
+        await Promise.all([
+          actionPromise,
+          fetch(`/api/session/${session.id}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'aborted', reason: 'interviewer_stop' })
+          }).catch(() => {})
+        ])
+        setActionNotice({ kind: 'success', message: 'Session stopped.' })
+        refresh().catch(() => {})
+        return
+      }
+
+      // Proceed: complete active round and start next, in parallel where possible
+      const activeRound = (rounds || []).find((round) => round.status === 'active')
+      const nextRound = (rounds || []).find((round) => round.status === 'pending')
+
+      // Wait for the gate event to land, then complete + start in sequence
+      // (start depends on complete finishing first)
+      await actionPromise
+
+      if (activeRound) {
+        await fetch('/api/round/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: session.id,
+            round_number: activeRound.round_number
+          })
         })
-      })
-    }
+      }
 
-    await refresh()
+      if (nextRound) {
+        await fetch('/api/round/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: session.id,
+            round_number: nextRound.round_number
+          })
+        })
+      }
+
+      setActionNotice({ kind: 'success', message: 'Proceeding to next round.' })
+      refresh().catch(() => {})
+    } finally {
+      setSendingAction(null)
+    }
   }
 
   const sendCandidateLink = async () => {
@@ -930,7 +962,7 @@ function InterviewerView() {
 
       setMagicLink(data.action_link)
       setSendLinkState('sent')
-      await refresh()
+      refresh().catch(() => {})
     } catch (error: any) {
       setSendLinkState('error')
       setSendLinkError(error?.message || 'Failed to send candidate link.')
@@ -947,15 +979,34 @@ function InterviewerView() {
   const endRound = async () => {
     const activeRound = (rounds || []).find((round) => round.status === 'active')
     if (!activeRound) return
-    await sendAction('end_round', { round_number: activeRound.round_number })
-    await fetch('/api/round/complete', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: session.id,
-        round_number: activeRound.round_number
-      })
-    })
+    setSendingAction('end_round')
+    setActionNotice({ kind: 'success', message: 'Ending round...' })
+    try {
+      // Fire event log and round complete in parallel
+      await Promise.all([
+        fetch('/api/interviewer/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: session.id,
+            action_type: 'end_round',
+            payload: { round_number: activeRound.round_number }
+          })
+        }).catch(() => {}),
+        fetch('/api/round/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: session.id,
+            round_number: activeRound.round_number
+          })
+        })
+      ])
+      setActionNotice({ kind: 'success', message: 'Round ended.' })
+      refresh().catch(() => {})
+    } finally {
+      setSendingAction(null)
+    }
   }
 
   const injectCurveball = async (curveball: string) => {
@@ -1466,92 +1517,6 @@ function InterviewerView() {
             </CardHeader>
             {showControls && (
               <CardContent className="space-y-4">
-                <div className="grid gap-4 rounded-lg border p-4">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Curveball
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <Select value={curveball} onValueChange={setCurveball}>
-                          <SelectTrigger className="h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="budget_cut">Budget cut</SelectItem>
-                            <SelectItem value="security_concern">Security concern</SelectItem>
-                            <SelectItem value="timeline_mismatch">Timeline mismatch</SelectItem>
-                            <SelectItem value="competitor_pressure">Competitor pressure</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Button variant="outline" size="sm" onClick={() => injectCurveball(curveball)}>
-                          Inject
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Persona
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <Select value={persona} onValueChange={setPersona}>
-                          <SelectTrigger className="h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="neutral">Neutral</SelectItem>
-                            <SelectItem value="skeptical">Skeptical</SelectItem>
-                            <SelectItem value="interested">Interested</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Button variant="outline" size="sm" onClick={() => switchPersona(persona)}>
-                          Switch
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Difficulty
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <Select value={escalationLevel} onValueChange={setEscalationLevel}>
-                          <SelectTrigger className="h-8">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="L1">L1</SelectItem>
-                            <SelectItem value="L2">L2</SelectItem>
-                            <SelectItem value="L3">L3</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Button variant="outline" size="sm" onClick={() => escalateDifficulty(escalationLevel)}>
-                          Escalate
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Round Control
-                      </label>
-                      <Button variant="outline" size="sm" className="w-full" onClick={endRound}>
-                        End round
-                      </Button>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                        Gate Decision
-                      </label>
-                      <Button variant="secondary" size="sm" className="w-full" onClick={() => sendDecision('proceed')}>
-                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                        Proceed
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
                 <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 px-4 py-4">
                   <div className="text-xs font-semibold uppercase tracking-[0.16em] text-red-700 dark:text-red-400">
                     Flag Red Flag
@@ -1606,28 +1571,23 @@ function InterviewerView() {
                     {sendingAction === 'flag_red_flag' ? 'Flagging...' : 'Flag'}
                   </Button>
                 </div>
-
-                <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3">
-                  <div>
-                    <p className="text-sm font-semibold text-destructive">Stop interview</p>
-                    <p className="text-xs text-destructive/80">Ends the session immediately.</p>
-                  </div>
-                  <Button variant="destructive" size="sm" onClick={() => sendDecision('stop')}>
-                    <Slash className="mr-2 h-4 w-4" />
-                    Stop
-                  </Button>
-                </div>
-                <p className="text-[11px] text-muted-foreground">Applies to next response</p>
               </CardContent>
             )}
           </Card>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Interviewer Notes</CardTitle>
-              <CardDescription>Saved to session action logs when submitted.</CardDescription>
+            <CardHeader className="py-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base">Interviewer Notes</CardTitle>
+                  <CardDescription className="text-xs mt-0.5">Saved to session action logs when submitted.</CardDescription>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setShowNotes((prev) => !prev)}>
+                  {showNotes ? 'Hide' : 'Show'}
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            {showNotes && (<CardContent className="space-y-3">
               <Textarea
                 rows={6}
                 value={notes}
@@ -1651,6 +1611,7 @@ function InterviewerView() {
                 All interviewer actions, notes, and magic-link events are logged for audit and post-assessment review.
               </div>
             </CardContent>
+            )}
           </Card>
 
           <Card>

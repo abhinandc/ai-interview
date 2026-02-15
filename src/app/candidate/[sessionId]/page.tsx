@@ -34,6 +34,30 @@ function AutoStopOverlay() {
   )
 }
 
+function SessionCompleteOverlay({ candidateName, roleName }: { candidateName: string; roleName: string }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 backdrop-blur-sm">
+      <Card className="mx-4 max-w-lg text-center">
+        <CardHeader className="space-y-4 pb-2">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10">
+            <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+          </div>
+          <CardTitle className="text-2xl">Session Complete</CardTitle>
+          <CardDescription className="text-base">
+            Thank you, {candidateName}. Your assessment for <span className="font-medium text-foreground">{roleName}</span> has been submitted successfully.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4 pt-2">
+          <div className="rounded-xl border bg-muted/30 p-4 text-sm text-muted-foreground">
+            All your responses have been auto-saved and submitted for evaluation. You will receive feedback from the hiring team.
+          </div>
+          <p className="text-xs text-muted-foreground">You may now close this window.</p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 function CandidateWorkspace() {
   const { session, scopePackage, rounds, currentRound, events, loading } = useSession()
   const [timeLeft, setTimeLeft] = useState(0)
@@ -331,6 +355,16 @@ function CandidateWorkspace() {
     // Auto-submit bypasses follow-up gating
     if (auto) {
       setSubmitting(true)
+
+      // Dispatch auto-save event so round UIs can do a final non-draft save
+      window.dispatchEvent(
+        new CustomEvent('round-auto-save', {
+          detail: { session_id: session.id, round_number: currentRound.round_number }
+        })
+      )
+      // Brief wait for round UIs to fire their save requests
+      await new Promise((resolve) => setTimeout(resolve, 500))
+
       await fetch("/api/round/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -351,6 +385,7 @@ function CandidateWorkspace() {
           })
         })
       }
+      // If no next round, session is marked 'completed' by the round/complete API
 
       setSubmitting(false)
       setTimeLeft(0)
@@ -466,8 +501,16 @@ function CandidateWorkspace() {
       }
     }
 
-    // Complete current round
+    // Auto-save candidate response before completing the round
     setSubmitting(true)
+    window.dispatchEvent(
+      new CustomEvent('round-auto-save', {
+        detail: { session_id: session.id, round_number: currentRound.round_number }
+      })
+    )
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    // Complete current round
     await fetch("/api/round/complete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -489,6 +532,7 @@ function CandidateWorkspace() {
         })
       })
     }
+    // If no next round, session is marked 'completed' by the round/complete API
 
     setSubmitting(false)
   }
@@ -587,11 +631,16 @@ function CandidateWorkspace() {
     return <AutoStopOverlay />
   }
 
-  const currentRoundNumber = currentRound.round_number || 1
-  const progress = ((currentRoundNumber - 1) / Math.max(rounds.length, 1)) * 100
-
   const candidateName = (session as any).candidate?.name || "Candidate"
   const roleName = (session as any).job?.title || "Assessment"
+
+  // Session completed — show completion screen
+  if (session.status === 'completed' || session.status === 'aborted') {
+    return <SessionCompleteOverlay candidateName={candidateName} roleName={roleName} />
+  }
+
+  const currentRoundNumber = currentRound.round_number || 1
+  const progress = ((currentRoundNumber - 1) / Math.max(rounds.length, 1)) * 100
   const roleTrack = (session as any).job?.track || "sales"
   const configuredRoleWidgets = (scopePackage as any)?.simulation_payloads?.role_widget_config?.lanes
   const configuredRoleFamily = (scopePackage as any)?.simulation_payloads?.role_widget_config?.role_family || roleTrack

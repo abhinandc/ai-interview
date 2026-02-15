@@ -239,6 +239,40 @@ export function AgenticChatUI({ round }: { round: Round }) {
     }
   }
 
+  // Auto-save on timer expiry: submit final non-draft transcript
+  const customerMsgsRef = useRef(customerMessages)
+  customerMsgsRef.current = customerMessages
+  const internalMsgsRef = useRef(internalMessages)
+  internalMsgsRef.current = internalMessages
+
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.round_number !== round.round_number || !session?.id) return
+      const custMsgs = customerMsgsRef.current
+      const intMsgs = internalMsgsRef.current
+      if (custMsgs.length === 0 && intMsgs.length === 0) return
+      await fetch('/api/artifact/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: session.id,
+          round_number: round.round_number,
+          artifact_type: 'agentic_transcript',
+          content: JSON.stringify({ customer_channel: custMsgs, internal_channel: intMsgs }),
+          metadata: {
+            draft: false,
+            auto_saved: true,
+            customer_messages: custMsgs.length,
+            internal_messages: intMsgs.length
+          }
+        })
+      }).catch(() => {})
+    }
+    window.addEventListener('round-auto-save', handler)
+    return () => window.removeEventListener('round-auto-save', handler)
+  }, [round.round_number, session?.id])
+
   if (!session) return null
 
   // Pre-start state

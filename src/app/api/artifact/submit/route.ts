@@ -30,42 +30,51 @@ export async function POST(request: Request) {
       })
     }
 
-    // Insert artifact — try with metadata column first, fall back without it
-    let artifact: any = null
-    const { data: withMeta, error: metaError } = await supabaseAdmin
-      .from('artifacts')
-      .insert({
-        session_id,
-        artifact_type,
-        url: '',
-        content,
-        round_number,
-        metadata: metadata || {}
-      })
-      .select()
-      .single()
+    // Insert artifact using only columns present in all schema versions.
+    // Some deployments may lack 'url' and/or 'metadata' columns.
+    const baseRow: Record<string, unknown> = {
+      session_id,
+      artifact_type,
+      content,
+      round_number
+    }
 
-    if (metaError && metaError.code === 'PGRST204') {
-      // metadata column doesn't exist — insert without it
-      const { data: withoutMeta, error: fallbackError } = await supabaseAdmin
+    let artifact: any = null
+    let insertError: any = null
+
+    // Try with all optional columns first, then progressively drop missing ones
+    const columnSets = [
+      { ...baseRow, url: '', metadata: metadata || {} },
+      { ...baseRow, url: '' },
+      { ...baseRow, metadata: metadata || {} },
+      baseRow
+    ]
+
+    for (const columns of columnSets) {
+      const { data, error } = await supabaseAdmin
         .from('artifacts')
-        .insert({
-          session_id,
-          artifact_type,
-          url: '',
-          content,
-          round_number
-        })
+        .insert(columns)
         .select()
         .single()
 
-      if (fallbackError) throw fallbackError
-      artifact = withoutMeta
-    } else if (metaError) {
-      throw metaError
-    } else {
-      artifact = withMeta
+      if (!error) {
+        artifact = data
+        insertError = null
+        break
+      }
+
+      if (error.code === 'PGRST204') {
+        // Column not found — try next set with fewer columns
+        insertError = error
+        continue
+      }
+
+      // Different error — stop trying
+      insertError = error
+      break
     }
+
+    if (insertError) throw insertError
 
     // Log event (live_events table)
     await supabaseAdmin.from('live_events').insert({

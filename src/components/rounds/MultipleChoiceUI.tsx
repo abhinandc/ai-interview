@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSession } from '@/contexts/SessionContext'
 import type { Round } from '@/lib/types/database'
 import { cn } from '@/lib/utils'
@@ -79,6 +79,38 @@ export function MultipleChoiceUI({ round }: { round: Round }) {
     })
     setIsSaving(false)
   }
+
+  // Auto-save on timer expiry: submit final non-draft selection
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.round_number !== round.round_number || !session?.id) return
+      if (!selectedRef.current) return
+      const opt = options.find((o) => o.id === selectedRef.current)
+      if (!opt) return
+      await fetch('/api/artifact/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: session.id,
+          round_number: round.round_number,
+          artifact_type: 'mcq_response',
+          content: opt.value,
+          metadata: {
+            draft: false,
+            auto_saved: true,
+            option_id: opt.id,
+            option_label: opt.label
+          }
+        })
+      }).catch(() => {})
+    }
+    window.addEventListener('round-auto-save', handler)
+    return () => window.removeEventListener('round-auto-save', handler)
+  }, [round.round_number, session?.id, options])
 
   if (!session) return null
 

@@ -2,54 +2,200 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: light;
-  --panel: #f5f3f0;
-  --panel-strong: #ece7e1;
-  --accent: #4b7fbe;
-  --accent-strong: #3a649b;
-  --signal: #e38a24;
-  --ink: #1f2e3f;
-  --muted: #6f5b46;
+@layer base {
+  :root {
+    /* Shadcn theme tokens stored as OKLCH channels (Tailwind wraps them in `oklch()`). */
+    --background: 1.00 0 0;
+    --foreground: 0.32 0 0;
+    --card: 1.00 0 0;
+    --card-foreground: 0.32 0 0;
+    --popover: 1.00 0 0;
+    --popover-foreground: 0.32 0 0;
+    --primary: 0.62 0.19 259.76;
+    --primary-foreground: 1.00 0 0;
+    --secondary: 0.97 0 0;
+    --secondary-foreground: 0.45 0.03 257.68;
+    --muted: 0.98 0 0;
+    --muted-foreground: 0.55 0.02 264.41;
+    --accent: 0.95 0.03 233.56;
+    --accent-foreground: 0.38 0.14 265.59;
+    --destructive: 0.64 0.21 25.39;
+    --destructive-foreground: 1.00 0 0;
+    --border: 0.93 0.01 261.82;
+    --input: 0.93 0.01 261.82;
+    --ring: 0.62 0.19 259.76;
+    --radius: 0.375rem;
+
+    --chart-1: 0.62 0.19 259.76;
+    --chart-2: 0.55 0.22 262.96;
+    --chart-3: 0.49 0.22 264.43;
+    --chart-4: 0.42 0.18 265.55;
+    --chart-5: 0.38 0.14 265.59;
+    --sidebar: 0.98 0 0;
+    --sidebar-foreground: 0.14 0 0;
+    --sidebar-primary: 0.20 0 0;
+    --sidebar-primary-foreground: 0.98 0 0;
+    --sidebar-accent: 0.97 0 0;
+    --sidebar-accent-foreground: 0.20 0 0;
+    --sidebar-border: 0.92 0 0;
+    --sidebar-ring: 0.71 0 0;
+    --font-serif: "SF Pro Display", "Inter", var(--font-inter), sans-serif;
+    --font-mono: "SF Pro Display", "Inter", var(--font-inter), sans-serif;
+    --shadow-2xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+    --shadow-xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+    --shadow-sm: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+    --shadow: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+    --shadow-md: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 2px 4px -2px hsl(0 0% 0% / 0.10);
+    --shadow-lg: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 4px 6px -2px hsl(0 0% 0% / 0.10);
+    --shadow-xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 8px 10px -2px hsl(0 0% 0% / 0.10);
+    --shadow-2xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.25);
+    --tracking-normal: 0em;
+
+    /* Liquid-glass utilities (inspired by Ein UI), driven by our theme tokens. */
+    --blur-xl: 24px;
+    --glass-shadow: oklch(0 0 0 / 0.10);
+    --glass-highlight: oklch(1 0 0 / 0.55);
+    --glass-glow-cyan: oklch(var(--chart-3) / 0.55);
+    --glass-glow-blue: oklch(var(--primary) / 0.55);
+    --glass-glow-purple: oklch(var(--chart-2) / 0.55);
+  }
+
+  .dark {
+    /* Dark theme tuned closer to black for a premium canvas feel. */
+    --background: 0.1453 0 0; /* ~ #0A0A0A */
+    --foreground: 0.92 0 0;
+    --card: 0.1782 0 0; /* ~ #111111 */
+    --card-foreground: 0.92 0 0;
+    --popover: 0.1782 0 0;
+    --popover-foreground: 0.92 0 0;
+    --primary: 0.62 0.19 259.76;
+    --primary-foreground: 1.00 0 0;
+    --secondary: 0.2185 0 0; /* ~ #1A1A1A */
+    --secondary-foreground: 0.92 0 0;
+    --muted: 0.1964 0 0; /* ~ #151515 */
+    --muted-foreground: 0.72 0 0;
+    --accent: 0.38 0.14 265.59;
+    --accent-foreground: 0.88 0.06 254.63;
+    --destructive: 0.64 0.21 25.39;
+    --destructive-foreground: 1.00 0 0;
+    --border: 0.2695 0 0; /* ~ #262626 */
+    --input: 0.2695 0 0;
+    --ring: 0.62 0.19 259.76;
+    --chart-1: 0.71 0.14 254.69;
+    --chart-2: 0.62 0.19 259.76;
+    --chart-3: 0.55 0.22 262.96;
+    --chart-4: 0.49 0.22 264.43;
+    --chart-5: 0.42 0.18 265.55;
+    --sidebar: 0.21 0.01 285.93;
+    --sidebar-foreground: 0.99 0 0;
+    --sidebar-primary: 0.49 0.24 264.40;
+    --sidebar-primary-foreground: 0.99 0 0;
+    --sidebar-accent: 0.27 0.01 286.10;
+    --sidebar-accent-foreground: 0.99 0 0;
+    --sidebar-border: 0.2695 0 0;
+    --sidebar-ring: 0.55 0.02 285.93;
+    --radius: 0.375rem;
+    --font-serif: "SF Pro Display", "Inter", var(--font-inter), sans-serif;
+    --font-mono: "SF Pro Display", "Inter", var(--font-inter), sans-serif;
+    --shadow-2xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+    --shadow-xs: 0px 4px 8px -1px hsl(0 0% 0% / 0.05);
+    --shadow-sm: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+    --shadow: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 1px 2px -2px hsl(0 0% 0% / 0.10);
+    --shadow-md: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 2px 4px -2px hsl(0 0% 0% / 0.10);
+    --shadow-lg: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 4px 6px -2px hsl(0 0% 0% / 0.10);
+    --shadow-xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.10), 0px 8px 10px -2px hsl(0 0% 0% / 0.10);
+    --shadow-2xl: 0px 4px 8px -1px hsl(0 0% 0% / 0.25);
+
+    --blur-xl: 28px;
+    --glass-shadow: oklch(0 0 0 / 0.55);
+    --glass-highlight: oklch(1 0 0 / 0.08);
+    --glass-glow-cyan: oklch(var(--chart-3) / 0.38);
+    --glass-glow-blue: oklch(var(--primary) / 0.42);
+    --glass-glow-purple: oklch(var(--chart-2) / 0.36);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "SF Pro Display", "Inter", var(--font-inter), sans-serif;
+    letter-spacing: var(--tracking-normal);
+  }
+  .theme {
+    --font-serif: "SF Pro Display", "Inter", var(--font-inter), sans-serif;
+    --font-mono: "SF Pro Display", "Inter", var(--font-inter), sans-serif;
+    --radius: 0.375rem;
+    --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
+    --tracking-tight: calc(var(--tracking-normal) - 0.025em);
+    --tracking-wide: calc(var(--tracking-normal) + 0.025em);
+    --tracking-wider: calc(var(--tracking-normal) + 0.05em);
+    --tracking-widest: calc(var(--tracking-normal) + 0.1em);
+  }
 }
 
-* {
-  box-sizing: border-box;
+@layer utilities {
+  .surface-grid {
+    background-image: radial-gradient(circle at 12% 12%, oklch(var(--primary) / 0.12), transparent 32%),
+      radial-gradient(circle at 88% 8%, oklch(var(--chart-3) / 0.1), transparent 28%),
+      radial-gradient(circle at 82% 86%, oklch(var(--chart-2) / 0.09), transparent 32%);
+  }
+
+  .glass-surface {
+    border: 1px solid oklch(var(--border) / 0.55);
+    background-color: oklch(var(--card) / 0.65);
+    -webkit-backdrop-filter: blur(var(--blur-xl));
+    backdrop-filter: blur(var(--blur-xl));
+    box-shadow: 0 18px 44px 0 var(--glass-shadow);
+  }
+
+  .glass-glow {
+    position: absolute;
+    inset: -4px;
+    border-radius: inherit;
+    opacity: 0.65;
+    filter: blur(16px);
+    background: linear-gradient(to right, var(--glass-glow-cyan), var(--glass-glow-blue), var(--glass-glow-purple));
+  }
+
+  .glass-highlight {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(to bottom, var(--glass-highlight), transparent);
+  }
+
+  .glass-inner-shadow {
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: inset 0 1px 1px oklch(1 0 0 / 0.08);
+  }
+
+  .hero-waves {
+    background:
+      radial-gradient(1000px 340px at 8% 18%, oklch(var(--primary) / 0.22), transparent 58%),
+      radial-gradient(900px 300px at 92% 6%, oklch(var(--chart-3) / 0.16), transparent 60%),
+      radial-gradient(700px 280px at 65% 88%, oklch(var(--chart-2) / 0.14), transparent 64%);
+    animation: waveFloat 12s ease-in-out infinite alternate;
+  }
 }
 
-body {
-  margin: 0;
-  min-height: 100vh;
-  background: linear-gradient(135deg, #f5f3f0 0%, #eef3f8 50%, #fef2c7 100%);
-  color: var(--ink);
-  font-family: var(--font-sans), system-ui, sans-serif;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-button {
-  font-family: inherit;
-}
-
-input,
-textarea,
-select {
-  font-family: inherit;
-}
-
-::-webkit-scrollbar {
-  height: 10px;
-  width: 10px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(54, 45, 38, 0.2);
-  border-radius: 999px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
+@keyframes waveFloat {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate3d(0, -8px, 0) scale(1.02);
+    opacity: 1;
+  }
 }

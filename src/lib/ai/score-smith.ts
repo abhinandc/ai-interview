@@ -1,9 +1,17 @@
 import OpenAI from 'openai'
 import { supabaseAdmin } from '@/lib/supabase/server'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
+let openaiClient: OpenAI | null = null
+
+function getOpenAIClient() {
+  if (openaiClient) return openaiClient
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not configured')
+  }
+  openaiClient = new OpenAI({ apiKey })
+  return openaiClient
+}
 
 export interface ScoringDimension {
   name: string
@@ -99,7 +107,7 @@ Rules:
 - Return JSON: {"followups": ["Q1", "Q2", ...]}`
 
   try {
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
@@ -121,7 +129,8 @@ export async function scoreArtifact(
   roundId: string,
   artifactId: string,
   artifactContent: string,
-  dimensions: ScoringDimension[]
+  dimensions: ScoringDimension[],
+  track?: string
 ): Promise<ScoringResult[]> {
   const results: ScoringResult[] = []
 
@@ -161,7 +170,7 @@ Be strict and evidence-based. Only award points where there is clear evidence.
 If you cannot provide evidence, return score 0 and an empty evidence array.`
 
     try {
-      const completion = await openai.chat.completions.create({
+      const completion = await getOpenAIClient().chat.completions.create({
         model: 'gpt-4o',
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
@@ -170,8 +179,8 @@ If you cannot provide evidence, return score 0 and an empty evidence array.`
 
       const result = JSON.parse(completion.choices[0].message.content || '{}')
 
-      // Check for red flags
-      await detectRedFlags(sessionId, roundId, dimension.name, result, artifactContent)
+      // Check for red flags — emit as live_events for realtime propagation
+      await detectRedFlags(sessionId, Number(roundId), dimension.name, result, artifactContent, track)
 
       const evidence = Array.isArray(result.evidence) ? result.evidence : []
       const hasEvidence = evidence.length > 0
@@ -197,63 +206,46 @@ If you cannot provide evidence, return score 0 and an empty evidence array.`
   return results
 }
 
+import { TRACK_FLAG_FILTERS } from '@/lib/constants/red-flags'
+import { emitRedFlag } from '@/lib/db/helpers'
+
 async function detectRedFlags(
   sessionId: string,
-  roundId: string,
+  roundNumber: number,
   dimension: string,
   scoringResult: any,
-  content: string
-) {
+  content: string,
+  track?: string
+): Promise<Array<{ flag_type: string; severity: string; auto_stop: boolean }>> {
+  const detected: Array<{ flag_type: string; severity: string; auto_stop: boolean }> = []
   const evidence = Array.isArray(scoringResult?.evidence) ? scoringResult.evidence : []
-  if (evidence.length === 0) {
-    return
+  if (evidence.length === 0) return detected
+
+  const checks = [
+    { dimension: 'reliability', condition: scoringResult.score < 8, flag_type: 'overpromising' as const, severity: 'critical' as const, description: 'Candidate may have overpromised or made false claims', auto_stop: true },
+    { dimension: 'communication', condition: scoringResult.score < 8, flag_type: 'conflict_escalation' as const, severity: 'critical' as const, description: 'Communication suggests escalation risk or poor conflict handling', auto_stop: true },
+    { dimension: 'verification', condition: scoringResult.score < 10, flag_type: 'overconfident_without_verification' as const, severity: 'critical' as const, description: 'Overconfident claims without a verification plan', auto_stop: true },
+    { dimension: 'verification', condition: scoringResult.score < 5, flag_type: 'no_testing_mindset' as const, severity: 'critical' as const, description: 'No evidence of testing mindset or quality assurance thinking', auto_stop: true },
+    { dimension: 'role_depth', condition: scoringResult.score < 15, flag_type: 'unsafe_data_handling' as const, severity: 'critical' as const, description: 'Potential unsafe handling of sensitive data or security gaps', auto_stop: true },
+  ]
+
+  for (const check of checks) {
+    if (check.dimension !== dimension || !check.condition) continue
+
+    const allowedTracks = TRACK_FLAG_FILTERS[check.flag_type]
+    if (allowedTracks && track && !allowedTracks.includes(track)) continue
+
+    await emitRedFlag(sessionId, {
+      flag_type: check.flag_type,
+      severity: check.severity,
+      description: check.description,
+      auto_stop: check.auto_stop,
+      round_number: roundNumber,
+      evidence,
+    })
+
+    detected.push({ flag_type: check.flag_type, severity: check.severity, auto_stop: check.auto_stop })
   }
 
-  // Check for overpromising (honesty dimension)
-  if (dimension === 'reliability' && scoringResult.score < 8) {
-    await supabaseAdmin.from('red_flags').insert({
-      session_id: sessionId,
-      round_id: roundId,
-      flag_type: 'overpromising',
-      severity: 'critical',
-      description: 'Candidate may have overpromised or made false claims',
-      evidence
-    })
-  }
-
-  // Check for poor objection handling
-  if (dimension === 'communication' && scoringResult.score < 8) {
-    await supabaseAdmin.from('red_flags').insert({
-      session_id: sessionId,
-      round_id: roundId,
-      flag_type: 'conflict_escalation',
-      severity: 'high',
-      description: 'Communication suggests escalation risk or poor conflict handling',
-      evidence
-    })
-  }
-
-  // Check for lack of verification discipline
-  if (dimension === 'verification' && scoringResult.score < 10) {
-    await supabaseAdmin.from('red_flags').insert({
-      session_id: sessionId,
-      round_id: roundId,
-      flag_type: 'overconfident_without_verification',
-      severity: 'critical',
-      description: 'Overconfident claims without a verification plan',
-      evidence
-    })
-  }
-
-  // Check for unsafe data handling hints
-  if (dimension === 'role_depth' && scoringResult.score < 15) {
-    await supabaseAdmin.from('red_flags').insert({
-      session_id: sessionId,
-      round_id: roundId,
-      flag_type: 'unsafe_data_handling',
-      severity: 'critical',
-      description: 'Potential unsafe handling of sensitive data or security gaps',
-      evidence
-    })
-  }
+  return detected
 }

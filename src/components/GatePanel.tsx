@@ -1,18 +1,31 @@
-import { AlertTriangle, CheckCircle2, Slash } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+'use client'
+
+import { AlertTriangle, CheckCircle2, Slash, ShieldAlert, TrendingUp } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
+import { Input } from "@/components/ui/input"
+
+export interface RedFlagEntry {
+  label: string;
+  detail?: string;
+  source?: string;
+  severity?: 'critical' | 'warning';
+  auto_stop?: boolean;
+  created_at?: string;
+}
 
 export interface GatePanelProps {
-  overall?: number;
-  confidence?: number;
-  dimensions?: Array<{ label: string; score: number; max?: number }>;
-  redFlags?: Array<{ label: string; detail?: string }>;
-  followups?: string[];
-  onDecision?: (decision: "proceed" | "stop") => void;
-  onAction?: (action: "escalate") => void;
-  onAddFollowup?: (followup: string) => void;
+  overall?: number
+  confidence?: number
+  dimensions?: Array<{ label: string; score: number; max?: number }>
+  redFlags?: RedFlagEntry[]
+  truthLog?: Array<{ dimension: string; quote: string; line?: number }>
+  followups?: string[]
+  onDecision?: (decision: "proceed" | "caution" | "stop") => void
+  onAction?: (action: "escalate") => void
+  onAddFollowup?: (followup: string) => void
 }
 
 export function GatePanel({
@@ -20,6 +33,7 @@ export function GatePanel({
   confidence,
   dimensions,
   redFlags,
+  truthLog,
   followups,
   onDecision,
   onAction,
@@ -30,101 +44,184 @@ export function GatePanel({
     confidence: confidence ?? 0,
     dimensions: dimensions ?? [],
     redFlags: redFlags ?? [],
+    truthLog: truthLog ?? [],
     followups: followups ?? []
-  };
+  }
 
   return (
-    <Card className="bg-white/90">
-      <CardHeader className="space-y-2">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-ink-900">Gate Panel</h2>
-          <Badge tone="sky">Live scoring</Badge>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-3xl font-semibold text-ink-900">{resolved.overall}</div>
-          <div className="text-sm text-ink-500">Overall score</div>
-        </div>
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-xs text-ink-500">
-            <span>Confidence</span>
-            <span>{resolved.confidence.toFixed(2)}</span>
+    <Card className="border-primary/20">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-primary" />
+              Gate Panel
+            </CardTitle>
+            <CardDescription>Live scoring, risks, and interviewer controls.</CardDescription>
           </div>
-          <Progress value={resolved.confidence * 100} />
+          <Badge variant="secondary">0-100</Badge>
         </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-muted-foreground">Overall score</p>
+            <p className="mt-1 text-3xl font-semibold">{resolved.overall}</p>
+          </div>
+          <div className="rounded-xl border p-3">
+            <p className="text-xs text-muted-foreground">Confidence</p>
+            <p className="mt-1 text-3xl font-semibold">{Math.round(resolved.confidence * 100)}%</p>
+          </div>
+        </div>
+
+        <Progress value={Math.max(0, Math.min(100, resolved.overall))} />
       </CardHeader>
+
       <CardContent className="space-y-5">
         <div className="space-y-3">
-          {resolved.dimensions.map((dimension) => (
-            <div key={dimension.label} className="space-y-1">
-              <div className="flex items-center justify-between text-sm">
-                <span>{dimension.label}</span>
-                <span className="font-semibold">{dimension.score}</span>
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Dimension Scores</p>
+          {resolved.dimensions.length === 0 && (
+            <p className="text-sm text-muted-foreground">No scores yet.</p>
+          )}
+          {resolved.dimensions.map((dimension) => {
+            const max = Number(dimension.max || 30)
+            const value = Number(dimension.score || 0)
+            return (
+              <div key={dimension.label} className="space-y-1">
+                <div className="flex items-center justify-between text-sm">
+                  <span>{dimension.label.replace(/_/g, " ")}</span>
+                  <span className="font-medium">{value}</span>
+                </div>
+                <Progress value={(value / max) * 100} />
               </div>
-              <Progress value={(dimension.score / (dimension.max || 30)) * 100} />
-            </div>
-          ))}
+            )
+          })}
         </div>
 
         <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">Red Flags</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Red Flags</p>
+            {resolved.redFlags.length > 0 && (
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                resolved.redFlags.some(f => f.severity === 'critical')
+                  ? 'bg-destructive/20 text-destructive'
+                  : 'bg-amber-200 text-amber-800'
+              }`}>
+                {resolved.redFlags.length}
+              </span>
+            )}
+          </div>
           {resolved.redFlags.length === 0 && (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-              No red flags detected.
+            <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 p-3 text-sm">
+              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <CheckCircle2 className="h-4 w-4" />
+                No critical flags detected
+              </div>
             </div>
           )}
-          {resolved.redFlags.map((flag) => (
+          <div className="max-h-[280px] space-y-3 overflow-y-auto pr-1">
+            {resolved.redFlags.map((flag, index) => {
+              const isCritical = flag.severity === 'critical'
+              return (
+                <div
+                  key={`${flag.label}-${index}`}
+                  className={`rounded-lg border p-3 text-sm ${
+                    isCritical
+                      ? 'border-destructive/50 bg-destructive/10 animate-pulse'
+                      : 'border-destructive/30 bg-destructive/10'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 font-medium text-destructive">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    {flag.label}
+                    {flag.auto_stop && (
+                      <span className="ml-auto rounded-full bg-destructive/20 px-2 py-0.5 text-[10px] font-semibold text-destructive">
+                        AUTO-STOP
+                      </span>
+                    )}
+                  </div>
+                  {flag.detail && (
+                    <p className="mt-1 text-xs text-muted-foreground">{flag.detail}</p>
+                  )}
+                  <div className="mt-2 flex items-center gap-2">
+                    {flag.source && (
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        flag.source === 'interviewer'
+                          ? 'bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300'
+                          : 'bg-muted text-muted-foreground'
+                      }`}>
+                        {flag.source === 'interviewer' ? 'Interviewer' : 'System'}
+                      </span>
+                    )}
+                    {flag.created_at && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(flag.created_at).toLocaleTimeString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+            TruthLog Evidence
+          </p>
+          {resolved.truthLog.length === 0 && (
+            <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+              Evidence quotes will appear after scoring.
+            </div>
+          )}
+          {resolved.truthLog.map((entry, index) => (
             <div
-              key={flag.label}
-              className="rounded-2xl border border-signal-200 bg-signal-100 px-4 py-3 text-sm"
+              key={`${entry.dimension}-${index}`}
+              className="rounded-lg border bg-muted/20 px-4 py-3 text-sm"
             >
-              <div className="flex items-center gap-2 font-semibold text-signal-800">
-                <AlertTriangle className="h-4 w-4" />
-                {flag.label}
-              </div>
-              {flag.detail && <p className="mt-1 text-xs text-signal-800">{flag.detail}</p>}
+              <div className="text-xs font-semibold text-muted-foreground">{entry.dimension}</div>
+              <p className="mt-2">&ldquo;{entry.quote}&rdquo;</p>
+              {entry.line !== undefined && entry.line !== null && (
+                <p className="mt-1 text-xs text-muted-foreground">Line {entry.line}</p>
+              )}
             </div>
           ))}
         </div>
 
         <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">
-            Recommended Follow-ups
-          </p>
-          <ul className="space-y-2 text-sm text-ink-700">
-            {resolved.followups.map((item) => (
-              <li key={item} className="rounded-2xl bg-ink-100 px-3 py-2">
-                {item}
-              </li>
-            ))}
+          <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Recommended Follow-ups</p>
+          <div className="space-y-2">
             {resolved.followups.length === 0 && (
-              <li className="rounded-2xl bg-ink-50 px-3 py-2 text-ink-500">No follow-ups suggested.</li>
+              <div className="rounded-lg border bg-muted/60 p-3 text-sm text-muted-foreground">
+                No follow-up suggestions yet.
+              </div>
             )}
-          </ul>
+            {resolved.followups.map((followup) => (
+              <div key={followup} className="rounded-lg border bg-muted/40 p-3 text-sm">
+                {followup}
+              </div>
+            ))}
+          </div>
+
           {onAddFollowup && (
             <div className="flex items-center gap-2">
-              <input
-                type="text"
-                className="flex-1 rounded-2xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-700"
-                placeholder="Add a follow-up question..."
+              <Input
+                placeholder="Add manual follow-up..."
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    const value = (event.currentTarget.value || "").trim();
-                    if (!value) return;
-                    onAddFollowup(value);
-                    event.currentTarget.value = "";
-                  }
+                  if (event.key !== "Enter") return
+                  const value = event.currentTarget.value.trim()
+                  if (!value) return
+                  onAddFollowup(value)
+                  event.currentTarget.value = ""
                 }}
               />
               <Button
                 variant="outline"
-                size="sm"
                 onClick={(event) => {
-                  const input = (event.currentTarget
-                    .previousElementSibling as HTMLInputElement | null);
-                  const value = (input?.value || "").trim();
-                  if (!value) return;
-                  onAddFollowup(value);
-                  if (input) input.value = "";
+                  const input = event.currentTarget.previousElementSibling as HTMLInputElement | null
+                  const value = input?.value?.trim()
+                  if (!value) return
+                  onAddFollowup(value)
+                  if (input) input.value = ""
                 }}
               >
                 Add
@@ -134,19 +231,26 @@ export function GatePanel({
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          <Button variant="outline" size="sm" onClick={() => onAction?.("escalate")}>
-            Escalate difficulty
+          <Button variant="outline" onClick={() => onAction?.("escalate")}>
+            <ShieldAlert className="h-4 w-4" />
+            Escalate
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => onDecision?.("proceed")}>
-            <CheckCircle2 className="mr-2 h-4 w-4" />
+          <Button variant="secondary" onClick={() => onDecision?.("caution")}>
+            <AlertTriangle className="h-4 w-4" />
+            Caution
+          </Button>
+          <Button variant="default" onClick={() => onDecision?.("proceed")}>
+            <CheckCircle2 className="h-4 w-4" />
             Proceed
           </Button>
-          <Button variant="danger" size="sm" onClick={() => onDecision?.("stop")}>
-            <Slash className="mr-2 h-4 w-4" />
+        </div>
+        <div className="grid grid-cols-1 gap-2">
+          <Button variant="destructive" onClick={() => onDecision?.("stop")}>
+            <Slash className="h-4 w-4" />
             Stop
           </Button>
         </div>
       </CardContent>
     </Card>
-  );
+  )
 }

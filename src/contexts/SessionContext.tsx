@@ -2,7 +2,7 @@
 
 import { createContext, useContext, ReactNode } from 'react'
 import { useRealtimeSession } from '@/hooks/useRealtimeSession'
-import type { InterviewSession, Round, Score, Event, InterviewScopePackage } from '@/lib/types/database'
+import type { Artifact, InterviewSession, Round, Score, Event, InterviewScopePackage } from '@/lib/types/database'
 
 interface SessionContextValue {
   session: InterviewSession | null
@@ -11,7 +11,10 @@ interface SessionContextValue {
   currentRound: Round | null
   scores: Score[]
   events: Event[]
+  artifacts: Artifact[]
+  assessments: any[]
   loading: boolean
+  refresh: () => Promise<void>
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(undefined)
@@ -25,7 +28,6 @@ export function SessionProvider({
 }) {
   const data = useRealtimeSession(sessionId)
 
-  // Find current round: active round, or first pending round, or first round
   const currentRound =
     data.rounds.find((r) => r.status === 'active') ||
     data.rounds.find((r) => r.status === 'pending') ||

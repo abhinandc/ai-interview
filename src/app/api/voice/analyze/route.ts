@@ -6,6 +6,30 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 })
 
+// Type definitions for AI response structures
+interface SayMeterResult {
+  score: number
+  factors: {
+    rapport: number
+    discovery: number
+    objection_handling: number
+    value_articulation: number
+    closing_momentum: number
+  }
+  summary: string
+}
+
+interface Suggestion {
+  category: 'context_injection' | 'curveball' | 'followup_question'
+  text: string
+  priority: 'low' | 'medium' | 'high' | 'critical'
+  rationale: string
+}
+
+interface SuggestionsResult {
+  suggestions: Suggestion[]
+}
+
 export async function POST(request: Request) {
   try {
     const { session_id, round_number } = await request.json()
@@ -24,7 +48,7 @@ export async function POST(request: Request) {
       .select('*')
       .eq('session_id', session_id)
       .eq('round_number', round_number || 1)
-      .order('timestamp', { ascending: true })
+      .order('timestamp', { ascending: false })
       .limit(20)
 
     if (transcriptError || !transcripts || transcripts.length === 0) {
@@ -35,7 +59,7 @@ export async function POST(request: Request) {
       )
     }
 
-    const recentMessages = transcripts
+    const recentMessages = transcripts.reverse()
 
     // Step 3: Build conversation context for OpenAI
     const conversationText = recentMessages
@@ -50,21 +74,21 @@ ${conversationText}
 
 Analyze the candidate's performance and provide a "Say Meter" health score (0-100) based on these factors:
 
-1. **Talk ratio** - Candidate should speak 60-70% of the time (ideal)
-2. **Question quality** - Are they asking discovery questions?
-3. **Active listening** - Do they build on prospect's responses?
-4. **Pacing** - Are they rushing or giving space for thought?
-5. **Objection handling** - How do they respond to pushback?
+1. **Rapport** - Building connection and trust (ideal: warm, engaging)
+2. **Discovery** - Asking questions to uncover needs (ideal: 60% questions, 40% statements)
+3. **Objection Handling** - Responding to pushback effectively
+4. **Value Articulation** - Clearly communicating benefits
+5. **Closing Momentum** - Moving toward next steps
 
 Return JSON:
 {
   "score": <number 0-100>,
   "factors": {
-    "talk_ratio": <number 0-100>,
-    "question_quality": <number 0-100>,
-    "active_listening": <number 0-100>,
-    "pacing": <number 0-100>,
-    "objection_handling": <number 0-100>
+    "rapport": <number 0-100>,
+    "discovery": <number 0-100>,
+    "objection_handling": <number 0-100>,
+    "value_articulation": <number 0-100>,
+    "closing_momentum": <number 0-100>
   },
   "summary": "<2 sentence explanation>"
 }
@@ -80,7 +104,7 @@ Be strict but fair. Most calls should score 40-70. Only exceptional performance 
       temperature: 0.3
     })
 
-    const sayMeterResult = JSON.parse(sayMeterResponse.choices[0].message.content || '{}')
+    const sayMeterResult: SayMeterResult = JSON.parse(sayMeterResponse.choices[0].message.content || '{}')
 
     // Step 5: Analyze with OpenAI - Suggestions
     const suggestionsPrompt = `You are a sales coach watching this discovery call.
@@ -118,8 +142,8 @@ Be selective. Only suggest if there's a clear gap or opportunity. Empty array is
       temperature: 0.7
     })
 
-    const suggestionsResult = JSON.parse(suggestionsResponse.choices[0].message.content || '{"suggestions":[]}')
-    const suggestions = suggestionsResult.suggestions || []
+    const suggestionsResult: SuggestionsResult = JSON.parse(suggestionsResponse.choices[0].message.content || '{"suggestions":[]}')
+    const suggestions: Suggestion[] = suggestionsResult.suggestions || []
 
     // Step 6: Save Say Meter to voice_analysis table
     const { data: meterRecord, error: meterError } = await supabaseAdmin
@@ -130,26 +154,28 @@ Be selective. Only suggest if there's a clear gap or opportunity. Empty array is
         analysis_type: 'say_meter',
         meter_score: sayMeterResult.score,
         meter_factors: sayMeterResult.factors,
-        meter_reasoning: sayMeterResult.summary,
-        created_at: new Date().toISOString()
+        meter_reasoning: sayMeterResult.summary
       })
       .select()
       .single()
 
     if (meterError) {
       console.error('Failed to save meter:', meterError)
+      return NextResponse.json(
+        { error: 'Failed to save analysis results', details: meterError.message },
+        { status: 500 }
+      )
     }
 
     // Step 7: Save suggestions to voice_analysis table
-    const suggestionRecords = suggestions.map((s: any) => ({
+    const suggestionRecords = suggestions.map((s: Suggestion) => ({
       session_id,
       round_number: round_number || 1,
       analysis_type: 'suggestion',
       suggestion_text: s.text,
       suggestion_category: s.category,
       priority: s.priority,
-      dismissed: false,
-      created_at: new Date().toISOString()
+      dismissed: false
     }))
 
     if (suggestionRecords.length > 0) {

@@ -1,74 +1,70 @@
-import Link from "next/link";
-import { ArrowRight, Shield, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-
-const highlights = [
-  {
-    title: "Candidate Experience",
-    description:
-      "Step-by-step workflow with task timers, dynamic inputs, and AI assistant guidance.",
-    icon: Sparkles
-  },
-  {
-    title: "Gate Panel",
-    description:
-      "Real-time scoring, red flags, and control levers for interviewer intervention.",
-    icon: Shield
-  }
-];
+import Link from "next/link"
+import { ArrowRight, Gauge, Bot, UserRoundCheck } from "lucide-react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 export default function HomePage() {
+  const showTestEntry = process.env.NODE_ENV !== "production"
+
   return (
-    <main className="min-h-screen px-6 py-12">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-10">
-        <header className="flex flex-col gap-6">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-2xl bg-skywash-600 shadow-aura" />
-            <span className="text-sm font-semibold uppercase tracking-[0.2em] text-ink-500">
-              Interview Platform
-            </span>
+    <main className="surface-grid min-h-screen px-4 py-8 md:px-8">
+      <div className="mx-auto max-w-6xl space-y-8">
+        <header className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">OneOrigin Inc.</p>
+            <h1 className="text-3xl font-semibold">AI Live Assessment Platform</h1>
           </div>
-          <div className="max-w-2xl space-y-5">
-            <h1 className="font-display text-4xl text-ink-900 md:text-5xl">
-              Governed by AI scoring and human control.
-            </h1>
-            <p className="text-base text-ink-600 md:text-lg">
-              Built for deterministic, auditable interviews with agent-based rounds and live gate decisions.
-              Candidates progress through structured tasks while interviewers monitor evidence-backed scores.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-4">
-            <Link href="/test">
-              <Button size="lg">
-                Create Test Session
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </Link>
-            <Link href="/interviewer">
-              <Button size="lg" variant="outline">
-                View Active Sessions
-              </Button>
-            </Link>
-          </div>
+          <ThemeToggle />
         </header>
 
-        <section className="grid gap-6 md:grid-cols-2">
-          {highlights.map((item) => (
-            <Card key={item.title} className="animate-rise-in">
-              <CardHeader>
-                <div className="flex items-center gap-3">
-                  <item.icon className="h-6 w-6 text-skywash-700" />
-                  <h2 className="text-xl font-semibold text-ink-900">{item.title}</h2>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-ink-600">{item.description}</p>
-              </CardContent>
-            </Card>
-          ))}
+        <section className="grid gap-6 md:grid-cols-3">
+          <Card className="md:col-span-2">
+            <CardHeader>
+              <Badge variant="secondary" className="w-fit">Candidate + Employer + Admin</Badge>
+              <CardTitle className="text-2xl">Production-ready live interview flow</CardTitle>
+              <CardDescription>
+                Candidate entry, timed assessment canvas, ChatGPT-class AI sidekick, and interviewer gate controls with evidence-backed metrics.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-3">
+              <Button asChild>
+                <Link href="/candidate/login">
+                  Candidate Login
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/interviewer">Interviewer Console</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/admin">Admin Dashboard</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/about-oneorigin">About OneOrigin</Link>
+              </Button>
+              {showTestEntry ? (
+                <Button asChild variant="secondary">
+                  <Link href="/test">Create Test Session</Link>
+                </Button>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Live Readiness</CardTitle>
+              <CardDescription>Current environment checks</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2"><Gauge className="h-4 w-4 text-primary" /> Secure backend linked</div>
+              <div className="flex items-center gap-2"><Bot className="h-4 w-4 text-primary" /> Sidekick endpoints active</div>
+              <div className="flex items-center gap-2"><UserRoundCheck className="h-4 w-4 text-primary" /> Candidate flow available</div>
+            </CardContent>
+          </Card>
         </section>
       </div>
     </main>
-  );
+  )
 }

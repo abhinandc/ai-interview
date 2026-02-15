@@ -1,6 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
 import { useSession } from '@/contexts/SessionContext'
 import type { Round } from '@/lib/types/database'
@@ -14,7 +16,6 @@ export function TextResponseUI({ round }: { round: Round }) {
   const handleChange = async (value: string) => {
     setResponse(value)
 
-    // Auto-save draft to backend
     if (value.length > 0 && session) {
       await fetch('/api/artifact/submit', {
         method: 'POST',
@@ -43,8 +44,6 @@ export function TextResponseUI({ round }: { round: Round }) {
     return response
   }, [outputs, workflow, response, round.config?.outputs, round.config?.workflow_stages])
 
-  const wordCount = structuredContent.split(/\s+/).filter(Boolean).length
-
   const saveStructured = async (payload: Record<string, any>) => {
     if (!session) return
     await fetch('/api/artifact/submit', {
@@ -66,16 +65,21 @@ export function TextResponseUI({ round }: { round: Round }) {
 
   if (!session) return null
 
+  const wordCount = (round.config?.outputs || round.config?.workflow_stages)
+    ? structuredContent.split(/\s+/).filter(Boolean).length
+    : response.split(/\s+/).filter(Boolean).length
+  const status = wordCount < 50 ? 'Needs more detail' : wordCount < 200 ? 'Good depth' : 'Comprehensive'
+
   return (
     <div className="space-y-4">
       {round.config?.outputs && (
         <div className="space-y-4">
-          <div className="rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm text-ink-600">
+          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
             Provide each section clearly. These will be scored separately.
           </div>
           {round.config.outputs.map((label: string) => (
             <div key={label} className="space-y-2">
-              <label className="text-sm font-semibold text-ink-900">{label}</label>
+              <label className="text-sm font-semibold">{label}</label>
               <Textarea
                 rows={4}
                 placeholder={`Enter ${label.toLowerCase()}...`}
@@ -93,12 +97,12 @@ export function TextResponseUI({ round }: { round: Round }) {
 
       {round.config?.workflow_stages && (
         <div className="space-y-4">
-          <div className="rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm text-ink-600">
+          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
             Build the pipeline and include quality gates at each step.
           </div>
           {round.config.workflow_stages.map((stage: string) => (
-            <div key={stage} className="rounded-2xl border border-ink-100 bg-white px-4 py-4 space-y-3">
-              <div className="text-sm font-semibold text-ink-900">{stage}</div>
+            <div key={stage} className="rounded-lg border bg-muted/20 px-4 py-4 space-y-3">
+              <div className="text-sm font-semibold">{stage}</div>
               <Textarea
                 rows={3}
                 placeholder={`Describe ${stage.toLowerCase()} step...`}
@@ -137,56 +141,54 @@ export function TextResponseUI({ round }: { round: Round }) {
       )}
 
       {!round.config?.outputs && !round.config?.workflow_stages && (
-        <Textarea
-          rows={14}
-          placeholder="Write your internal handoff note here...
-
-Example structure:
-- Deal summary (customer, opportunity size, timeline)
-- Key commitments made
-- Open questions or risks
-- Next steps for the account team
-- Who needs to be involved"
-          value={response}
-          onChange={(e) => handleChange(e.target.value)}
-          className="font-sans"
-        />
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Written Response</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Textarea
+              rows={14}
+              placeholder="Write your response here..."
+              value={response}
+              onChange={(event) => handleChange(event.target.value)}
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">Word count: {wordCount}</p>
+              <Badge variant={wordCount < 50 ? 'outline' : 'secondary'}>{status}</Badge>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
-      <div className="rounded-2xl border border-ink-100 bg-white px-4 py-3">
-        <div className="flex items-center justify-between text-xs">
-          <span className="text-ink-500">Word count: {wordCount}</span>
-          {wordCount > 0 && wordCount < 50 && (
-            <span className="text-caution-600">Aim for at least 50 words</span>
-          )}
-          {wordCount >= 50 && wordCount < 200 && (
-            <span className="text-signal-600">Good length</span>
-          )}
-          {wordCount >= 200 && (
-            <span className="text-ink-500">Comprehensive</span>
-          )}
+      {(round.config?.outputs || round.config?.workflow_stages) && (
+        <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-4 py-3">
+          <span className="text-xs text-muted-foreground">Word count: {wordCount}</span>
+          <Badge variant={wordCount < 50 ? 'outline' : 'secondary'}>{status}</Badge>
         </div>
-      </div>
+      )}
 
       {round.config?.optional && (
-        <div className="rounded-2xl bg-skywash-50 px-4 py-3">
-          <p className="text-sm text-skywash-800">
-            <strong>Note:</strong> This is an optional round. You may skip to complete the interview,
-            but completing it demonstrates strong follow-up discipline.
-          </p>
-        </div>
+        <Card>
+          <CardContent className="pt-6 text-sm text-muted-foreground">
+            Optional round. Completing it strengthens evidence for follow-up rigor and ownership.
+          </CardContent>
+        </Card>
       )}
 
-      <div className="rounded-2xl border border-ink-100 bg-white px-4 py-4">
-        <h3 className="mb-3 text-sm font-semibold">What to Include</h3>
-        <ul className="space-y-2 text-sm text-ink-600">
-          <li>✓ Deal status summary (where we are, what was discussed)</li>
-          <li>✓ Key commitments made (timeline, pricing, deliverables)</li>
-          <li>✓ Identified risks or red flags</li>
-          <li>✓ Next steps with owners and deadlines</li>
-          <li>✓ Who needs to be looped in (sales eng, legal, product)</li>
-        </ul>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Checklist</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2 text-sm text-muted-foreground">
+            <li>Deal status and context</li>
+            <li>Key commitments made during the interview</li>
+            <li>Risks and open questions</li>
+            <li>Next steps with owners and timelines</li>
+            <li>Cross-functional handoff dependencies</li>
+          </ul>
+        </CardContent>
+      </Card>
     </div>
   )
 }

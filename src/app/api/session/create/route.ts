@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '@/lib/supabase/server'
+import { randomUUID } from 'crypto'
 import { extractResumeSkills, computeInterviewLevel } from '@/lib/db/helpers'
 
 const openai = new OpenAI({
@@ -49,7 +50,7 @@ export async function POST(request: Request) {
         title: role,
         location: 'Remote',
         level_band: level.toLowerCase() as 'junior' | 'mid' | 'senior',
-        track: resolvedTrack as 'sales' | 'agentic_eng' | 'fullstack' | 'marketing' | 'implementation' | 'HR' | 'security',
+        track: resolvedTrack,
         role_success_criteria: getRoleSuccessCriteria(resolvedTrack),
         must_have_flags: [],
         disqualifiers: [],
@@ -62,7 +63,19 @@ export async function POST(request: Request) {
 
     if (jobError) throw jobError
 
-    // Step 2: Find existing candidate or create new one
+    // Step 2: Create canonical job row (best-effort for legacy FK compatibility)
+    const { error: canonicalJobError } = await supabaseAdmin
+      .from('jobs')
+      .insert({
+        job_id: jobProfile.job_id,
+        job_title: role,
+        location: 'Remote'
+      })
+    if (canonicalJobError) {
+      console.warn('Jobs table insert skipped:', canonicalJobError.message)
+    }
+
+    // Step 3: Find existing candidate or create new one
     const candidateEmail = `${candidate_name.toLowerCase().replace(/\s+/g, '.')}@temp.com`
     const { data: existingCandidate } = await supabaseAdmin
       .from('candidates')
@@ -77,6 +90,7 @@ export async function POST(request: Request) {
       const { data: newCandidate, error: candidateError } = await supabaseAdmin
         .from('candidates')
         .insert({
+          hash_id: randomUUID(),
           rippling_candidate_id: `temp_${Date.now()}`,
           name: candidate_name,
           email: candidateEmail,
@@ -97,7 +111,7 @@ export async function POST(request: Request) {
         .eq('id', candidate.id)
     }
 
-    // Step 3: Create session
+    // Step 4: Create session
     const { data: session, error: sessionError } = await supabaseAdmin
       .from('interview_sessions')
       .insert({
@@ -182,7 +196,7 @@ export async function POST(request: Request) {
       pi_pass_fail: latestPi?.pass_fail ?? null
     }
 
-    // Step 4: Create scope package with round plan
+    // Step 5: Create scope package with round plan
     const { data: scopePackage, error: scopeError } = await supabaseAdmin
       .from('interview_scope_packages')
       .insert({
@@ -190,8 +204,13 @@ export async function POST(request: Request) {
         generated_at: new Date().toISOString(),
         track: resolvedTrack,
         round_plan: roundPlan,
-        question_set: questionSet,
-        simulation_payloads: {},
+        question_set: roundPlan.some((r: Record<string, any>) => r.round_type === 'voice-realtime') ? {} : questionSet,
+        simulation_payloads: {
+          role_widget_config: {
+            role_family: resolvedTrack,
+            lanes: []
+          }
+        },
         rubric_version: '1.0',
         models_used: ['gpt-4o'],
         approved_by: null
@@ -201,7 +220,7 @@ export async function POST(request: Request) {
 
     if (scopeError) throw scopeError
 
-    // Step 5: Log session creation event
+    // Step 6: Log session creation event
     await supabaseAdmin.from('live_events').insert({
       session_id: session.id,
       event_type: 'session_created',

@@ -78,30 +78,37 @@ export async function GET(
       .eq('session_id', sessionId)
       .order('created_at', { ascending: false })
 
-    return NextResponse.json(
-      {
-        session: {
-          ...session,
-          candidate, // Add populated candidate
-          job: jobProfile, // Add populated job profile
-          candidate_insights: {
-            pi_score_overall: piScore ?? null,
-            pass_fail: latestPi?.pass_fail ?? null,
-            resume_skills: resumeSkills,
-            interview_level: interviewLevel
-          }
-        },
-        scopePackage,
-        rounds,
-        events,
-        scores
-      },
-      {
-        headers: {
-          'Cache-Control': 'no-store, max-age=0'
+    // Get related artifacts (including optional resume docs)
+    const { data: artifacts } = await supabaseAdmin
+      .from('artifacts')
+      .select('*')
+      .eq('session_id', sessionId)
+      .order('created_at', { ascending: false })
+      .limit(50)
+
+    return NextResponse.json({
+      session: {
+        ...session,
+        candidate, // Add populated candidate
+        job: jobProfile, // Add populated job profile
+        candidate_insights: {
+          pi_score_overall: piScore ?? null,
+          pass_fail: latestPi?.pass_fail ?? null,
+          resume_skills: resumeSkills,
+          interview_level: interviewLevel
         }
+      },
+      scopePackage,
+      rounds,
+      events,
+      scores,
+      artifacts: artifacts || []
+    }, 
+    {
+      headers: {
+        'Cache-Control': 'no-store, max-age=0'
       }
-    )
+    })
   } catch (error: any) {
     console.error('Session fetch error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })

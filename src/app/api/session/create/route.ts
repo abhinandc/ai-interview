@@ -112,96 +112,74 @@ export async function POST(request: Request) {
 
     if (sessionError) throw sessionError
 
-    const useVoiceRealtime = track !== undefined && difficulty !== undefined && resolvedTrack === 'sales'
+    // Fetch blueprints and generated items for track-based round generation
+    const { data: blueprints } = await supabaseAdmin
+      .from('assessment_blueprints')
+      .select('*')
+      .eq('track', resolvedTrack)
+      .order('created_at', { ascending: true })
+      .limit(3)
 
-    let roundPlan: Array<Record<string, any>>
-    let questionSet: Record<string, any>
+    const { data: generatedItems } = await supabaseAdmin
+      .from('generated_question_items')
+      .select('*')
+      .eq('track', resolvedTrack)
+      .eq('status', 'validated')
+      .order('created_at', { ascending: false })
+      .limit(3)
 
-    if (useVoiceRealtime) {
-      roundPlan = [
-        {
-          round_number: 1,
-          round_type: 'voice-realtime' as const,
-          title: 'Round 1: Live Voice Call with AI Prospect',
-          prompt: 'Conduct a live voice discovery call with an AI prospect. Ask discovery questions, handle objections, demonstrate value, and close for next steps.',
-          duration_minutes: 12,
-          status: 'pending' as const,
-          config: {
-            persona_id: null,
-            scenario_id: null,
-            initial_difficulty: voiceDifficulty,
-            allow_curveballs: false,
-            voice: 'sage'
-          }
-        }
-      ]
-      questionSet = {}
-    } else {
-      const { data: blueprints } = await supabaseAdmin
-        .from('assessment_blueprints')
-        .select('*')
-        .eq('track', resolvedTrack)
-        .order('created_at', { ascending: true })
-        .limit(3)
+    // Retrieve PI screening for candidate-specific adaptation
+    const { data: piScreenings, error: piError } = await supabaseAdmin
+      .from('pi_screenings')
+      .select('*')
+      .eq('candidate_id', candidate.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
 
-      const { data: generatedItems } = await supabaseAdmin
-        .from('generated_question_items')
-        .select('*')
-        .eq('track', resolvedTrack)
-        .eq('status', 'validated')
-        .order('created_at', { ascending: false })
-        .limit(3)
+    if (piError) {
+      console.warn('PI screenings query failed (table may not exist yet):', piError.message)
+    }
+    const latestPi = piScreenings?.[0] || null
+    const piScore = latestPi?.pi_score_overall ?? null
+    const interviewLevel = computeInterviewLevel(level, piScore, experience_years_max)
+    const resumeSkills = extractResumeSkills(latestPi?.resume_analysis)
+    const piDimensionScores = latestPi?.dimension_scores || {}
 
-      const { data: piScreenings, error: piError } = await supabaseAdmin
-        .from('pi_screenings')
-        .select('*')
-        .eq('candidate_id', candidate.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-
-      if (piError) {
-        console.warn('PI screenings query failed (table may not exist yet):', piError.message)
-      }
-      const latestPi = piScreenings?.[0] || null
-      const piScore = latestPi?.pi_score_overall ?? null
-      const interviewLevel = computeInterviewLevel(level, piScore, experience_years_max)
-      const resumeSkills = extractResumeSkills(latestPi?.resume_analysis)
-      const piDimensionScores = latestPi?.dimension_scores || {}
-
-      const roleSignals = {
-        jd_text: jobProfile.role_success_criteria,
-        must_haves: jobProfile.must_have_flags,
-        nice_to_haves: jobProfile.disqualifiers,
-        ai_native_behaviors: resumeSkills.filter((s: string) => /ai|ml|llm|gpt|agent|automat/i.test(s)),
-        track_skill_graph: {
-          extracted_skills: resumeSkills,
-          pi_dimension_scores: piDimensionScores,
-          pi_score_overall: piScore,
-          interview_level: interviewLevel
-        },
-        past_outcomes: {
-          pi_pass_fail: latestPi?.pass_fail ?? null,
-          pi_score: piScore
-        },
-        failure_modes: {}
-      }
-
-      roundPlan =
-        generatedItems && generatedItems.length > 0
-          ? buildRoundsFromGeneratedItems(generatedItems, interviewLevel)
-          : await buildRoundsFromBlueprints(blueprints || [], roleSignals, resolvedTrack, interviewLevel)
-
-      if (!roundPlan || roundPlan.length === 0) {
-        roundPlan = buildFallbackRounds(resolvedTrack, role, interviewLevel)
-      }
-
-      questionSet = {
-        interview_level: interviewLevel,
-        role_signals: roleSignals,
-        pi_screening_id: latestPi?.id || null,
+    const roleSignals = {
+      jd_text: jobProfile.role_success_criteria,
+      must_haves: jobProfile.must_have_flags,
+      nice_to_haves: jobProfile.disqualifiers,
+      ai_native_behaviors: resumeSkills.filter((s: string) => /ai|ml|llm|gpt|agent|automat/i.test(s)),
+      track_skill_graph: {
+        extracted_skills: resumeSkills,
+        pi_dimension_scores: piDimensionScores,
         pi_score_overall: piScore,
-        pi_pass_fail: latestPi?.pass_fail ?? null
-      }
+        interview_level: interviewLevel
+      },
+      past_outcomes: {
+        pi_pass_fail: latestPi?.pass_fail ?? null,
+        pi_score: piScore
+      },
+      failure_modes: {},
+      voice_difficulty: voiceDifficulty  // Pass voice difficulty for sales track voice rounds
+    }
+
+    // Priority: pre-validated questions → blueprint generation → fallback
+    let roundPlan: Array<Record<string, any>> =
+      generatedItems && generatedItems.length > 0
+        ? buildRoundsFromGeneratedItems(generatedItems, interviewLevel)
+        : await buildRoundsFromBlueprints(blueprints || [], roleSignals, resolvedTrack, interviewLevel)
+
+    if (!roundPlan || roundPlan.length === 0) {
+      roundPlan = buildFallbackRounds(resolvedTrack, role, interviewLevel) as Array<Record<string, any>>
+    }
+
+    const questionSet = {
+      interview_level: interviewLevel,
+      role_signals: roleSignals,
+      pi_screening_id: latestPi?.id || null,
+      pi_score_overall: piScore,
+      pi_pass_fail: latestPi?.pass_fail ?? null
     }
 
     // Step 4: Create scope package with round plan
@@ -212,7 +190,7 @@ export async function POST(request: Request) {
         generated_at: new Date().toISOString(),
         track: resolvedTrack,
         round_plan: roundPlan,
-        question_set: useVoiceRealtime ? {} : questionSet,
+        question_set: questionSet,
         simulation_payloads: {},
         rubric_version: '1.0',
         models_used: ['gpt-4o'],
@@ -739,14 +717,22 @@ function pickRandom(list: any) {
 }
 
 async function buildSalesRounds(blueprints: any[], roleSignals: any) {
+  // Use voice-realtime for sales with ElevenLabs integration
+  const voiceDifficulty = roleSignals?.voice_difficulty ?? 3
+
   const defaults = [
     {
-      title: 'Round 1: Live Persona Sell',
-      round_type: 'voice' as const,
+      title: 'Round 1: Live Voice Call with AI Prospect',
+      round_type: 'voice-realtime' as const,
       duration_minutes: 12,
       prompt:
-        'Conduct a discovery call with a prospect. Ask at least 5 discovery questions, quantify value, and handle objections professionally.',
+        'Conduct a live voice discovery call with an AI prospect. Ask discovery questions, handle objections, demonstrate value, and close for next steps.',
       config: {
+        persona_id: null,
+        scenario_id: null,
+        initial_difficulty: voiceDifficulty,
+        allow_curveballs: false,
+        voice: 'sage',
         persona: 'prospect_with_objections',
         required_questions: 5,
         required_objections: 3,

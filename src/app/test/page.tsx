@@ -5,36 +5,47 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 
+// Role definitions with track and level auto-mapped
 const ROLES = [
   // Sales
-  { label: 'AI Solutions Account Executive', category: 'Sales', level: 'mid' },
-  { label: 'Sales Development Representative (SDR/BDR)', category: 'Sales', level: 'junior' },
+  { label: 'AI Solutions Account Executive', track: 'sales', level: 'mid' },
+  { label: 'Sales Development Representative (SDR/BDR)', track: 'sales', level: 'junior' },
   // Agentic / Full-Stack Engineering
-  { label: 'AI Solutions Engineer — Agentic', category: 'Agentic Engineering', level: 'mid' },
-  { label: 'AI Research Intern — Agentic Systems', category: 'Agentic Engineering', level: 'junior' },
-  { label: 'Full-Stack Engineer', category: 'Full-Stack Engineering', level: 'mid' },
-  { label: 'Full-Stack Engineer — Growth Automation', category: 'Full-Stack Engineering', level: 'mid' },
+  { label: 'AI Solutions Engineer — Agentic', track: 'agentic_eng', level: 'mid' },
+  { label: 'AI Research Intern — Agentic Systems', track: 'agentic_eng', level: 'junior' },
+  { label: 'Full-Stack Engineer', track: 'fullstack', level: 'mid' },
+  { label: 'Full-Stack Engineer — Growth Automation', track: 'fullstack', level: 'mid' },
   // Marketing
-  { label: 'Growth Marketing Manager — AI Products', category: 'Marketing', level: 'mid' },
-  { label: 'Performance Marketing Specialist', category: 'Marketing', level: 'mid' },
-  { label: 'Brand Strategist', category: 'Marketing', level: 'senior' },
-  { label: 'Campaign Ops Lead', category: 'Marketing', level: 'senior' },
+  { label: 'Growth Marketing Manager — AI Products', track: 'marketing', level: 'mid' },
+  { label: 'Performance Marketing Specialist', track: 'marketing', level: 'mid' },
+  { label: 'Brand Strategist', track: 'marketing', level: 'senior' },
+  { label: 'Campaign Ops Lead', track: 'marketing', level: 'senior' },
   // Implementation / Customer Outcomes
-  { label: 'AI Solutions Consultant (Techno-Functional Pre-Sales)', category: 'Implementation', level: 'mid' },
-  { label: 'Client Delivery Lead — AI Enablement', category: 'Implementation', level: 'senior' },
-  { label: 'Customer Outcomes Manager — AI Launch', category: 'Implementation', level: 'mid' },
+  { label: 'AI Solutions Consultant (Techno-Functional Pre-Sales)', track: 'implementation', level: 'mid' },
+  { label: 'Client Delivery Lead — AI Enablement', track: 'implementation', level: 'senior' },
+  { label: 'Customer Outcomes Manager — AI Launch', track: 'implementation', level: 'mid' },
   // Data Steward
-  { label: 'Data Steward — Knowledge & Taxonomy', category: 'Data Steward', level: 'mid' },
-  { label: 'Data Steward — Retrieval QA', category: 'Data Steward', level: 'mid' },
+  { label: 'Data Steward — Knowledge & Taxonomy', track: 'data_steward', level: 'mid' },
+  { label: 'Data Steward — Retrieval QA', track: 'data_steward', level: 'mid' },
   // People Ops
-  { label: 'People Ops Coordinator', category: 'People Ops', level: 'junior' },
+  { label: 'People Ops Coordinator', track: 'HR', level: 'junior' },
 ]
+
+// Track display names
+const TRACK_NAMES: Record<string, string> = {
+  sales: 'Sales',
+  agentic_eng: 'Agentic Engineering',
+  fullstack: 'Full-Stack Engineering',
+  marketing: 'Marketing',
+  implementation: 'Implementation',
+  data_steward: 'Data Steward',
+  HR: 'People Ops',
+  security: 'Security'
+}
 
 export default function TestPage() {
   const [candidateName, setCandidateName] = useState('Test Megha')
-  const [role, setRole] = useState(ROLES[0].label)
-  const [level, setLevel] = useState(ROLES[0].level)
-  const [track, setTrack] = useState('sales')
+  const [selectedRole, setSelectedRole] = useState(ROLES[0])
   const [difficulty, setDifficulty] = useState(3)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<any>(null)
@@ -51,9 +62,9 @@ export default function TestPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           candidate_name: candidateName,
-          role,
-          level,
-          track,
+          role: selectedRole.label,
+          level: selectedRole.level,
+          track: selectedRole.track,
           difficulty
         })
       })
@@ -94,59 +105,39 @@ export default function TestPage() {
           </div>
 
           <div>
-            <label className="text-sm font-medium block mb-1">Role</label>
+            <label className="text-sm font-medium block mb-1">
+              Role
+              <span className="ml-2 text-xs text-ink-500">
+                (Track: {TRACK_NAMES[selectedRole.track]} | Level: {selectedRole.level})
+              </span>
+            </label>
             <select
-              value={role}
+              value={selectedRole.label}
               onChange={(e) => {
                 const selected = ROLES.find(r => r.label === e.target.value)
-                setRole(e.target.value)
-                if (selected) setLevel(selected.level)
+                if (selected) setSelectedRole(selected)
               }}
               className="w-full rounded-2xl border border-ink-100 bg-white px-4 py-2 text-sm text-ink-900 focus:border-skywash-500 focus:outline-none focus:ring-2 focus:ring-skywash-200"
             >
-              {Array.from(new Set(ROLES.map(r => r.category))).map(cat => (
-                <optgroup key={cat} label={cat}>
-                  {ROLES.filter(r => r.category === cat).map(r => (
-                    <option key={r.label} value={r.label}>{r.label}</option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="text-sm font-medium block mb-1">Level</label>
-            <select
-              value={level}
-              onChange={(e) => setLevel(e.target.value)}
-              className="w-full px-3 py-2 border rounded-md"
-            >
-              <option value="junior">Junior</option>
-              <option value="mid">Mid</option>
-              <option value="senior">Senior</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="text-sm font-medium block mb-1">Track (Blueprint)</label>
-            <select
-              value={track}
-              onChange={(e) => setTrack(e.target.value)}
-              className="w-full px-3 py-2 border rounded-md"
-            >
-              <option value="sales">Sales</option>
-              <option value="agentic_eng">Agentic Engineering</option>
-              <option value="fullstack">Fullstack</option>
-              <option value="marketing">Marketing</option>
-              <option value="implementation">Implementation</option>
-              <option value="HR">HR</option>
-              <option value="security">Security</option>
+              {Object.entries(TRACK_NAMES).map(([trackKey, trackName]) => {
+                const rolesInTrack = ROLES.filter(r => r.track === trackKey)
+                if (rolesInTrack.length === 0) return null
+                return (
+                  <optgroup key={trackKey} label={trackName}>
+                    {rolesInTrack.map(r => (
+                      <option key={r.label} value={r.label}>
+                        {r.label} ({r.level})
+                      </option>
+                    ))}
+                  </optgroup>
+                )
+              })}
             </select>
           </div>
 
           <div>
             <label className="text-sm font-medium block mb-1">
-              Difficulty Level
+              Voice Interview Intensity (Sales track only)
               <span className="ml-2 text-xs text-ink-500">
                 ({difficulty}/5 - {difficulty === 1 ? '🟢 Easy' : difficulty === 2 ? '🟡 Mild' : difficulty === 3 ? '🟠 Moderate' : difficulty === 4 ? '🔴 Hard' : '⚫ Adversarial'})
               </span>
@@ -164,11 +155,14 @@ export default function TestPage() {
               <span>Moderate</span>
               <span>Adversarial</span>
             </div>
+            <p className="text-xs text-ink-500 mt-1">
+              Controls objection difficulty and persona hostility in voice rounds
+            </p>
           </div>
 
           <Button
             onClick={createSession}
-            disabled={loading || !candidateName || !role}
+            disabled={loading || !candidateName || !selectedRole}
             className="w-full"
           >
             {loading ? 'Creating...' : 'Create Session'}

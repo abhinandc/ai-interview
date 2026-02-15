@@ -467,7 +467,7 @@ function InterviewerView() {
   >([])
   const [showNotes, setShowNotes] = useState(false)
   const [showFollowups, setShowFollowups] = useState(false)
-  const [showControls, setShowControls] = useState(false)
+  const [showControls, setShowControls] = useState(true)
   const [curveball, setCurveball] = useState('budget_cut')
   const [persona, setPersona] = useState('skeptical')
   const [escalationLevel, setEscalationLevel] = useState('L3')

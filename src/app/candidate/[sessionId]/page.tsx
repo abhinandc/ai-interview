@@ -36,7 +36,7 @@ function CandidateView() {
   const [serverFollowups, setServerFollowups] = useState<
     Array<{ id: string; question: string; round_number?: number | null; source?: string }>
   >([])
-  const [showSidekick, setShowSidekick] = useState(false)
+  const [showSidekick, setShowSidekick] = useState(true)
   const [localFollowups, setLocalFollowups] = useState<
     Array<{ question_id: string; question: string; round_number: number }>
   >([])

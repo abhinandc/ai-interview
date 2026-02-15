@@ -2,9 +2,17 @@ import { NextResponse } from 'next/server'
 import OpenAI from 'openai'
 import { supabaseAdmin } from '@/lib/supabase/server'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-})
+let openaiClient: OpenAI | null = null
+
+function getOpenAIClient() {
+  if (openaiClient) return openaiClient
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not configured')
+  }
+  openaiClient = new OpenAI({ apiKey })
+  return openaiClient
+}
 
 const PROSPECT_PERSONA = `You are a VP of Operations at a mid-market B2B SaaS company.
 
@@ -33,6 +41,58 @@ Response style:
 
 Remember: You're evaluating THEM. Be tough but fair.`
 
+const PERSONA_LIBRARY: Record<string, string> = {
+  skeptical_buyer: PROSPECT_PERSONA,
+  cfo_pushback: `You are the CFO at a mid-market B2B SaaS company.
+
+Personality: Direct, numbers-first, risk-aware, skeptical. You do not tolerate hand-waving.
+
+Context: You're pulled into the evaluation late because cost and risk are escalating. You care about ROI, payback period, budget impact, and contractual risk.
+
+Conversation objectives:
+- Challenge assumptions and vague claims ("Show me how you calculated that.")
+- Push on pricing, timeline, legal/security risk, and scope creep
+- Force tradeoffs and prioritization: "If we can only do one thing in 6 weeks, what is it?"
+- If the candidate overpromises, call it out immediately
+
+Response style:
+- Crisp, high-pressure, 1-3 sentences
+- Ask for numbers, proof, and commitments with clear ownership
+
+Remember: You're evaluating THEM. Be tough but fair.`,
+  security_lead: `You are the Security Lead at a mid-market B2B SaaS company.
+
+Personality: Calm, precise, skeptical. You focus on data handling, auth, logging, and compliance.
+
+Context: This solution touches customer data. You must understand risk posture before approving anything.
+
+Conversation objectives:
+- Ask about data flow, storage, access controls, and auditability
+- Ask about compliance expectations (SOC2, ISO27001), security reviews, and incident response
+- Push back on weak answers and require concrete safeguards
+
+Response style:
+- Technical but accessible, 2-4 sentences
+- Probe with specific follow-ups, avoid generic objections
+
+Remember: You're evaluating THEM. Be tough but fair.`,
+  champion: `You are the Director of Operations (internal champion) at a mid-market B2B SaaS company.
+
+Personality: Constructively critical, supportive but not naive. You want this to work, but need confidence.
+
+Context: You see value but need alignment across CFO and Security. You're testing clarity and execution.
+
+Conversation objectives:
+- Ask for a clear plan, milestones, ownership, and change management
+- Push for concise next steps and a realistic timeline
+- If the candidate is strong, give room to close for a next step
+
+Response style:
+- Helpful, 2-4 sentences, still asks hard questions
+
+Remember: You're evaluating THEM. Be tough but fair.`
+}
+
 export async function POST(request: Request) {
   try {
     const { session_id, round_id, round_number, message, conversation_history, persona_state, metrics } = await request.json()
@@ -50,35 +110,68 @@ export async function POST(request: Request) {
       .eq('id', session_id)
       .single()
 
+    let personaKey: string = 'skeptical_buyer'
+    let injectedCurveballs: Array<{ key?: string; title?: string; detail?: string }> = []
+    let difficultyBoostFromControls = 0
+    try {
+      const { data: scopePackage } = await supabaseAdmin
+        .from('interview_scope_packages')
+        .select('round_plan,simulation_payloads')
+        .eq('session_id', session_id)
+        .single()
+
+      const roundPlan = Array.isArray((scopePackage as any)?.round_plan) ? (scopePackage as any).round_plan : []
+      const currentRound = roundPlan.find((round: any) => round?.round_number === round_number) || null
+      const controls = (scopePackage as any)?.simulation_payloads?.interviewer_controls || {}
+
+      personaKey = String(
+        currentRound?.config?.persona_override ||
+          currentRound?.config?.persona ||
+          controls?.persona_override ||
+          personaKey
+      )
+
+      injectedCurveballs = Array.isArray(currentRound?.config?.injected_curveballs)
+        ? currentRound.config.injected_curveballs
+        : []
+
+      if (controls?.difficulty_boost) {
+        difficultyBoostFromControls = 1
+      }
+    } catch {
+      // Non-blocking: live conversation must still work even if scope metadata is unavailable.
+    }
+
     const conversationLength = conversation_history?.length || 0
-    let difficultyBoost = 0
+    let difficultyBoost = difficultyBoostFromControls
     const isStart = message === '__start__'
 
     let piContext = 'No PI screening data available.'
     let scoreContext = 'No score data available.'
-    if (isStart) {
-      try {
-        const { data: actions } = await supabaseAdmin
-          .from('live_events')
-          .select('*')
-          .eq('session_id', session_id)
-          .eq('event_type', 'interviewer_action')
-          .order('created_at', { ascending: false })
-          .limit(10)
+    try {
+      const { data: actions } = await supabaseAdmin
+        .from('live_events')
+        .select('*')
+        .eq('session_id', session_id)
+        .eq('event_type', 'interviewer_action')
+        .order('created_at', { ascending: false })
+        .limit(25)
 
-        const match = (actions || []).find((event: any) => {
-          return (
-            event.payload?.action_type === 'escalate_difficulty' &&
-            (event.payload?.target_round === round_number || event.payload?.target_round == null)
-          )
-        })
+      const match = (actions || []).find((event: any) => {
+        return (
+          event.payload?.action_type === 'escalate_difficulty' &&
+          (event.payload?.target_round === round_number || event.payload?.target_round == null)
+        )
+      })
 
-        if (match) {
-          difficultyBoost = 1
-        }
-      } catch {
-        difficultyBoost = 0
+      if (match) {
+        difficultyBoost = 1
       }
+    } catch {
+      // ignore
+    }
+
+    if (isStart) {
 
       if (session?.candidate_id) {
         try {
@@ -217,9 +310,19 @@ export async function POST(request: Request) {
     const effectivePersonaState = personaOverride || persona_state
 
     // Build conversation for OpenAI
+    const personaPrompt = PERSONA_LIBRARY[personaKey] || PROSPECT_PERSONA
+    const injectedCurveballNote =
+      injectedCurveballs.length > 0
+        ? `Additional constraints to incorporate naturally as objections or pressure. Do not say the word "curveball".\n${injectedCurveballs
+            .slice(-3)
+            .map((item) => `- ${(item?.title || item?.key || 'Constraint')}: ${item?.detail || ''}`.trim())
+            .join('\n')}`
+        : null
+
     const messages = [
-      { role: 'system', content: PROSPECT_PERSONA },
-      { role: 'system', content: `Current persona state: ${effectivePersonaState}. Metrics: ${JSON.stringify(metrics)}` },
+      { role: 'system', content: personaPrompt },
+      ...(injectedCurveballNote ? [{ role: 'system', content: injectedCurveballNote }] : []),
+      { role: 'system', content: `Current persona state: ${persona_state}. Metrics: ${JSON.stringify(metrics)}` },
       { role: 'system', content: `Difficulty level (1-5): ${difficulty}. If 4-5, push on constraints, ask multi-part questions, and introduce curveballs earlier.` },
       ...(followupToAsk
         ? [
@@ -270,7 +373,7 @@ export async function POST(request: Request) {
     ]
 
     // Call OpenAI
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: 'gpt-4o',
       messages: messages as any,
       temperature: 0.8,

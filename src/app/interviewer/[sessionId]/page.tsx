@@ -1,20 +1,39 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { AlertTriangle, CheckCircle2, Slash } from 'lucide-react'
 import { useParams } from 'next/navigation'
+import {
+  ArrowLeft,
+  BadgeCheck,
+  Clock3,
+  Copy,
+  ExternalLink,
+  FileText,
+  Link2,
+  Loader2,
+  ShieldAlert,
+  Sparkles,
+  Wand2
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Select } from '@/components/ui/select'
-import { Progress } from '@/components/ui/progress'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { GatePanel } from '@/components/GatePanel'
+import { ContributionGraph } from '@/components/ui/smoothui/contribution-graph'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { SessionProvider, useSession } from '@/contexts/SessionContext'
+import { getRoleWidgetTemplate, normalizeRoleWidgetConfig, roleWidgetFamilies } from '@/lib/role-widget-templates'
+import { ThemeToggle } from '@/components/theme-toggle'
+import { Progress } from '@/components/ui/progress'
 import type { RedFlagEntry } from '@/components/GatePanel'
 import { RED_FLAG_TYPES } from '@/lib/constants/red-flags'
 import type { RedFlagTypeKey } from '@/lib/constants/red-flags'
 import { VoiceControlPanel } from '@/components/VoiceControlPanel'
 import { AIAssessmentsPanel } from '@/components/AIAssessmentsPanel'
-import { SessionProvider, useSession } from '@/contexts/SessionContext'
 import { useVoiceAnalysis } from '@/hooks/useVoiceAnalysis'
 import { SayMeter } from '@/components/voice/SayMeter'
 import { SuggestionsPanel } from '@/components/voice/SuggestionsPanel'
@@ -210,9 +229,7 @@ function buildGateData(scores: any[], events?: any[]) {
     }
   }
 
-  const dimensionRows = scores
-    .filter((row: any) => row.dimension && row.score !== undefined)
-    .slice(0, 10)
+  const dimensionRows = scores.filter((row: any) => row.dimension && row.score !== undefined).slice(0, 10)
 
   const maxPerDimension = 30
   const avgScore =
@@ -368,6 +385,7 @@ function buildActionLog(events: any[]) {
     'scoring_completed',
     'interviewer_action',
     'candidate_action',
+    'magic_link_issued',
     'difficulty_adaptation',
     'red_flag_detected',
     'auto_stop_triggered',
@@ -450,8 +468,40 @@ function buildActionLog(events: any[]) {
   return actions
 }
 
+function resolveResumeUrl(artifacts: any[]) {
+  for (const artifact of artifacts || []) {
+    const metadata = artifact?.metadata || {}
+    const candidateUrl =
+      metadata.resume_url || metadata.pdf_url || metadata.file_url || metadata.document_url || artifact?.url
+
+    if (typeof candidateUrl === 'string' && candidateUrl.toLowerCase().includes('.pdf')) {
+      return candidateUrl
+    }
+  }
+
+  return null
+}
+
 function InterviewerView() {
-  const { session, scores, events, rounds } = useSession()
+  const { session, scopePackage, scores, events, rounds, artifacts, refresh } = useSession()
+  const [notes, setNotes] = useState('')
+  const [magicLink, setMagicLink] = useState<string | null>(null)
+  const [sendLinkState, setSendLinkState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [sendLinkError, setSendLinkError] = useState<string | null>(null)
+  const [widgetRoleFamily, setWidgetRoleFamily] = useState<string>('sales')
+  const [widgetConfigText, setWidgetConfigText] = useState('')
+  const [widgetConfigState, setWidgetConfigState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [widgetConfigError, setWidgetConfigError] = useState<string | null>(null)
+  const [actionNotice, setActionNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const [resumePreview, setResumePreview] = useState<{
+    signedUrl: string
+    filename: string | null
+    storagePath: string | null
+  } | null>(null)
+  const [resumePreviewState, setResumePreviewState] = useState<'idle' | 'loading' | 'ready' | 'missing' | 'error'>(
+    'idle'
+  )
+  const [resumePreviewError, setResumePreviewError] = useState<string | null>(null)
   const [localFollowups, setLocalFollowups] = useState<
     Array<{ id: string; question: string; round_number?: number; created_at: string }>
   >([])
@@ -492,6 +542,21 @@ function InterviewerView() {
     return buildGateData(scores as any[], events as any[])
   }, [session?.status, isVoiceRealtimeActive, transcript, scores, events])
   const actionLog = useMemo(() => buildActionLog(events as any[]), [events])
+  const resumeUrl = useMemo(() => resolveResumeUrl(artifacts as any[]), [artifacts])
+  const activityData = useMemo(() => {
+    const dailyCounts = new Map<string, number>()
+
+    for (const event of (events as any[]) || []) {
+      const date = new Date(event.created_at).toISOString().slice(0, 10)
+      dailyCounts.set(date, (dailyCounts.get(date) || 0) + 1)
+    }
+
+    return [...dailyCounts.entries()].map(([date, count]) => ({
+      date,
+      count,
+      level: Math.min(4, Math.floor(count / 2))
+    }))
+  }, [events])
   const noAnswerFlag = useMemo(() => {
     return gateData.redFlags.some((flag) =>
       ['insufficient_response', 'no_evidence'].includes(flag.label)
@@ -629,9 +694,65 @@ function InterviewerView() {
     return Array.from(new Set([...(gateData.followups || []), ...local]))
   }, [gateData.followups, localFollowups])
 
+  // Derive role track even when session is temporarily null so hooks stay stable.
+  const roleTrack = (session as any)?.job?.track || 'sales'
+
+  // Important: keep hooks unconditional. The session is null on initial render; returning early
+  // before calling `useEffect` changes hook order once session loads, causing React warnings.
+  useEffect(() => {
+    const configured = (scopePackage as any)?.simulation_payloads?.role_widget_config
+    const roleFamily = configured?.role_family || roleTrack
+    const lanes = normalizeRoleWidgetConfig(configured?.lanes)
+    const resolved = lanes.length > 0 ? lanes : getRoleWidgetTemplate(roleFamily)
+    setWidgetRoleFamily(roleFamily)
+    setWidgetConfigText(JSON.stringify(resolved, null, 2))
+  }, [scopePackage, roleTrack])
+
+  useEffect(() => {
+    if (!actionNotice) return
+    const timeout = setTimeout(() => setActionNotice(null), 2600)
+    return () => clearTimeout(timeout)
+  }, [actionNotice])
+
+  const fetchResumePreview = async (sessionId: string) => {
+    setResumePreviewState('loading')
+    setResumePreviewError(null)
+    try {
+      const response = await fetch(`/api/session/${sessionId}/resume`)
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to load resume preview.')
+      }
+
+      if (data?.signed_url) {
+        setResumePreview({
+          signedUrl: data.signed_url,
+          filename: data?.filename ?? null,
+          storagePath: data?.storage_path ?? null
+        })
+        setResumePreviewState('ready')
+        return
+      }
+
+      setResumePreview(null)
+      setResumePreviewState('missing')
+    } catch (error: any) {
+      setResumePreview(null)
+      setResumePreviewState('error')
+      setResumePreviewError(error?.message || 'Failed to load resume preview.')
+    }
+  }
+
+  useEffect(() => {
+    if (!session?.id) return
+    void fetchResumePreview(session.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id])
+
   if (!session) return null
 
   const candidateName = (session as any).candidate?.name || 'Candidate'
+  const candidateEmail = (session as any).candidate?.email || ''
   const jobTitle = (session as any).job?.title || 'Role'
   const jobLevel = (session as any).job?.level_band || 'mid'
   const jobLevelLabel =
@@ -668,7 +789,7 @@ function InterviewerView() {
   const isCallInProgress = !!voiceActiveRound && isVoiceRealtimeActive
 
   const sendAction = async (action_type: string, payload?: Record<string, any>) => {
-    await fetch('/api/interviewer/action', {
+    const response = await fetch('/api/interviewer/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -677,16 +798,39 @@ function InterviewerView() {
         payload
       })
     })
+
+    let data: any = null
+    try {
+      data = await response.json()
+    } catch {
+      data = null
+    }
+
+    if (!response.ok) {
+      setActionNotice({ kind: 'error', message: data?.error || `Action failed: ${action_type}` })
+      return { ok: false, data }
+    }
+
+    setActionNotice({ kind: 'success', message: `Action applied: ${action_type.replace(/_/g, ' ')}` })
+    await refresh()
+    return { ok: true, data }
   }
 
-  const sendDecision = async (decision: 'proceed' | 'stop') => {
+  const sendDecision = async (decision: 'proceed' | 'caution' | 'stop') => {
     await sendAction('gate_decision', { decision })
+
+    if (decision === 'caution') {
+      await refresh()
+      return
+    }
+
     if (decision === 'stop') {
-      await fetch(`/api/session/${session.id}/terminate`, {
+      await fetch(`/api/session/${session.id}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'interviewer_stop' })
+        body: JSON.stringify({ status: 'aborted', reason: 'interviewer_stop' })
       })
+      await refresh()
       return
     }
 
@@ -713,6 +857,33 @@ function InterviewerView() {
           round_number: nextRound.round_number
         })
       })
+    }
+
+    await refresh()
+  }
+
+  const sendCandidateLink = async () => {
+    setSendLinkState('sending')
+    setSendLinkError(null)
+
+    try {
+      const response = await fetch('/api/interviewer/send-link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: session.id })
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate candidate access link.')
+      }
+
+      setMagicLink(data.action_link)
+      setSendLinkState('sent')
+      await refresh()
+    } catch (error: any) {
+      setSendLinkState('error')
+      setSendLinkError(error?.message || 'Failed to send candidate link.')
     }
   }
 
@@ -751,79 +922,203 @@ function InterviewerView() {
     })
   }
 
+  const copyMagicLink = async () => {
+    if (!magicLink) return
+    await navigator.clipboard.writeText(magicLink)
+  }
+
+  const loadRoleWidgetTemplate = () => {
+    const template = getRoleWidgetTemplate(widgetRoleFamily)
+    setWidgetConfigText(JSON.stringify(template, null, 2))
+    setWidgetConfigState('idle')
+    setWidgetConfigError(null)
+  }
+
+  const saveRoleWidgetConfig = async () => {
+    if (!widgetConfigText.trim()) return
+    setWidgetConfigState('saving')
+    setWidgetConfigError(null)
+
+    try {
+      const parsed = JSON.parse(widgetConfigText)
+      const normalized = normalizeRoleWidgetConfig(parsed)
+      if (normalized.length === 0) {
+        throw new Error('Widget config requires at least one lane with steps.')
+      }
+
+      await sendAction('role_widget_config', {
+        role_family: widgetRoleFamily,
+        lanes: normalized
+      })
+
+      setWidgetConfigText(JSON.stringify(normalized, null, 2))
+      setWidgetConfigState('saved')
+    } catch (error: any) {
+      setWidgetConfigState('error')
+      setWidgetConfigError(error?.message || 'Invalid widget config JSON.')
+    }
+  }
+
+  const statusVariant =
+    session.status === 'live' ? 'default' : session.status === 'completed' ? 'secondary' : 'outline'
+
+  const setSessionStatus = async (status: 'completed' | 'aborted', reason?: string) => {
+    const response = await fetch(`/api/session/${session.id}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, reason: reason || null })
+    })
+
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      setActionNotice({ kind: 'error', message: data?.error || 'Failed to update session status.' })
+      return
+    }
+
+    setActionNotice({ kind: 'success', message: `Session marked ${status}.` })
+    await refresh()
+  }
+
+  const resolvedResumeUrl = resumePreview?.signedUrl || resumeUrl
+
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#eef6ff_0%,#f7f7fb_35%,#fefefe_100%)] px-4 py-8 sm:px-6">
-      <div className="mx-auto grid w-full max-w-6xl gap-5 lg:grid-cols-[1.1fr,1fr]">
+    <main className="surface-grid min-h-screen px-4 py-8 md:px-8">
+      <div className="mx-auto w-full max-w-7xl space-y-5">
+        <header className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/interviewer">
+                <ArrowLeft className="h-4 w-4" />
+                Sessions
+              </Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/">Home</Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/admin">Admin</Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/about-oneorigin">About</Link>
+            </Button>
+            <Button variant="ghost" size="sm" asChild>
+              <a href="https://www.oneorigin.us/" target="_blank" rel="noreferrer">
+                Website
+              </a>
+            </Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => void setSessionStatus('completed', 'interviewer_complete')}>
+              Mark Completed
+            </Button>
+            <Button size="sm" variant="destructive" onClick={() => void setSessionStatus('aborted', 'interviewer_abort')}>
+              Abort Session
+            </Button>
+            <ThemeToggle />
+          </div>
+        </header>
+
+        <div className="grid w-full gap-6 lg:grid-cols-[1.15fr,1fr]">
         <section className="space-y-6">
-          <Card className="bg-white/90">
-            <CardHeader className="space-y-1 pb-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Badge tone="sky" className="text-[11px] flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    {session.status}
-                  </Badge>
-                  {session.status === 'live' && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        if (!confirm('Complete this session? All pending rounds will be skipped.')) {
-                          return
-                        }
-                        try {
-                          const response = await fetch(`/api/session/${session.id}/complete`, {
-                            method: 'POST'
-                          })
-                          const result = await response.json()
-                          if (result.success) {
-                            alert('Session completed! Refresh to see updated status.')
-                            window.location.reload()
-                          } else {
-                            alert('Failed to complete session: ' + result.error)
-                          }
-                        } catch (err) {
-                          console.error('Failed to complete session:', err)
-                          alert('Error completing session')
-                        }
-                      }}
-                    >
-                      Complete Session
-                    </Button>
-                  )}
+          <Card>
+            <CardHeader className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Interviewer Console</p>
+                  <h1 className="text-2xl font-semibold">{candidateName}</h1>
                 </div>
+                <Badge variant={statusVariant} className="capitalize">
+                  {session.status}
+                </Badge>
               </div>
-              <div>
-                <h1 className="text-2xl font-semibold text-ink-900">{candidateName}</h1>
-                <p className="mt-1 text-sm text-ink-600">
-                  {jobTitle} • {jobLevelLabel}
-                </p>
-                {insightLine && (
-                  <p className="mt-2 text-xs text-ink-400">{insightLine}</p>
-                )}
-                {currentRoundLabel && (
-                  <p className="mt-2 text-xs text-ink-500">{currentRoundLabel}</p>
-                )}
-                {totalRounds > 0 && (
-                  <div className="mt-3 space-y-2">
-                    <div className="flex items-center justify-between text-xs text-ink-500">
-                      <span>Round progress</span>
-                      <span>{completedRounds}/{totalRounds}</span>
-                    </div>
-                    <Progress value={roundProgress} />
+              <CardDescription>
+                {jobTitle} | Level {jobLevel} | {candidateEmail || 'No candidate email on file'}
+              </CardDescription>
+              {insightLine && (
+                <p className="text-xs text-muted-foreground">{insightLine}</p>
+              )}
+              {currentRoundLabel && (
+                <p className="text-xs text-muted-foreground">{currentRoundLabel}</p>
+              )}
+              {totalRounds > 0 && (
+                <div className="mt-2 space-y-2">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Round progress</span>
+                    <span>{completedRounds}/{totalRounds}</span>
                   </div>
-                )}
-              </div>
+                  <Progress value={roundProgress} />
+                </div>
+              )}
             </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={sendCandidateLink} disabled={sendLinkState === 'sending'}>
+                  {sendLinkState === 'sending' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Link2 className="h-4 w-4" />
+                  )}
+                  Send Candidate Link
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => sendAction('inject_curveball')}>
+                  <Sparkles className="h-4 w-4" />
+                  Inject Curveball
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => sendAction('switch_persona')}>
+                  <Wand2 className="h-4 w-4" />
+                  Switch Persona
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => sendAction('end_round')}>
+                  <Clock3 className="h-4 w-4" />
+                  End Round
+                </Button>
+              </div>
+
+              {actionNotice && (
+                <div
+                  className={
+                    actionNotice.kind === 'error'
+                      ? 'rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive'
+                      : 'rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-300'
+                  }
+                >
+                  {actionNotice.message}
+                </div>
+              )}
+
+              {sendLinkState === 'error' && (
+                <p className="text-sm text-destructive">{sendLinkError || 'Unable to generate candidate link.'}</p>
+              )}
+
+              {magicLink && (
+                <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                  <p className="text-xs text-muted-foreground">Live magic link generated and logged.</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input value={magicLink} readOnly className="font-mono text-xs" />
+                    <Button size="sm" variant="outline" onClick={copyMagicLink}>
+                      <Copy className="h-4 w-4" />
+                      Copy
+                    </Button>
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={magicLink} target="_blank" rel="noreferrer">
+                        <ExternalLink className="h-4 w-4" />
+                        Open
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
           </Card>
 
           {autoStopTriggered && (
-            <div className="rounded-2xl border-2 border-red-400 bg-red-50 px-5 py-4 animate-pulse">
+            <div className="rounded-lg border-2 border-destructive/40 bg-destructive/10 px-5 py-4 animate-pulse">
               <div className="flex items-center gap-3">
-                <AlertTriangle className="h-5 w-5 text-red-600" />
+                <AlertTriangle className="h-5 w-5 text-destructive" />
                 <div>
-                  <p className="font-semibold text-red-800">Session Auto-Stopped</p>
-                  <p className="text-sm text-red-600">
+                  <p className="font-semibold text-destructive">Session Auto-Stopped</p>
+                  <p className="text-sm text-destructive/80">
                     A critical red flag triggered automatic session termination.
                   </p>
                 </div>
@@ -831,54 +1126,136 @@ function InterviewerView() {
             </div>
           )}
 
-          <Card className="animate-rise-in bg-white/90">
-            <CardHeader className="space-y-1">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Transcript</h2>
-                <Badge tone="neutral" className="text-[11px]">Live</Badge>
-              </div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Live Transcript</CardTitle>
+              <CardDescription>Conversation and candidate statements in chronological order.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {noAnswerFlag && (
-                <div className="rounded-2xl border border-signal-200 bg-signal-100 px-4 py-3 text-sm text-signal-800">
-                  Candidate responses are too short to evaluate. Marked as insufficient response.
-                </div>
-              )}
               {transcript.length === 0 && (
-                <div className="rounded-2xl bg-ink-50 px-4 py-3 text-sm text-ink-500">
-                  Waiting for conversation.
+                <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  Transcript will populate after the conversation starts.
                 </div>
               )}
               {transcript.map((entry, index) => (
-                <div key={`${entry.time}-${index}`} className="rounded-2xl bg-ink-100 px-4 py-3">
-                  <div className="flex items-center justify-between text-xs text-ink-500">
+                <div key={`${entry.time}-${index}`} className="rounded-lg border bg-muted/20 p-3">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>{entry.speaker}</span>
                     <span>{entry.time}</span>
                   </div>
-                  <p className="mt-2 text-sm text-ink-800">{entry.content}</p>
+                  <p className="mt-2 text-sm">{entry.content}</p>
                 </div>
               ))}
             </CardContent>
           </Card>
 
-
-          <Card className="bg-white/90">
+          <Card>
             <CardHeader>
-              <h3 className="text-base font-semibold">Action Log</h3>
+              <CardTitle className="text-base">Round Timeline</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              {actionLog.length === 0 && (
-                <div className="rounded-2xl bg-ink-50 px-4 py-3 text-sm text-ink-500">
-                  No actions yet.
+              {roundTimeline.length === 0 && (
+                <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                  No rounds are loaded for this session.
                 </div>
               )}
+              {roundTimeline.map((round) => {
+                const roundStatusVariant =
+                  round.status === 'active' ? 'default' : round.status === 'completed' ? 'secondary' : 'outline'
+
+                return (
+                  <div key={round.round_number} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div>
+                      <p className="text-sm font-medium">
+                        Round {round.round_number}: {round.title}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {round.startedAt
+                          ? `${round.startedAt.toLocaleTimeString()} to ${round.endsAt?.toLocaleTimeString()}`
+                          : `Duration: ${round.durationMinutes} min`}
+                      </p>
+                    </div>
+                    <Badge variant={roundStatusVariant}>{round.status}</Badge>
+                  </div>
+                )
+              })}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Candidate Action Log</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {actionLog.length === 0 && <p className="text-sm text-muted-foreground">Waiting for actions...</p>}
               {actionLog.map((entry, index) => (
-                <div key={`${entry.time}-${index}`} className="flex items-center justify-between text-sm">
-                  <span className="text-ink-700">{entry.action}</span>
-                  <span className="text-xs text-ink-500">{entry.detail}</span>
-                  <span className="text-xs text-ink-400">{entry.time}</span>
+                <div key={`${entry.time}-${index}`} className="grid grid-cols-[1fr,1fr,auto] items-center gap-2 text-sm">
+                  <span>{entry.action}</span>
+                  <span className="truncate text-muted-foreground">{entry.detail || '-'}</span>
+                  <span className="text-xs text-muted-foreground">{entry.time}</span>
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Hiring Manager Activity Map</CardTitle>
+              <CardDescription>Heatmap view of session event intensity.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ContributionGraph data={activityData} showLegend year={new Date().getFullYear()} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileText className="h-4 w-4 text-primary" />
+                Quick Resume View
+              </CardTitle>
+              <CardDescription>
+                Preview the uploaded resume PDF for this candidate. No hardcoded resume content is shown.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {resumePreviewState === 'loading'
+                    ? 'Loading resume preview...'
+                    : resumePreviewState === 'ready'
+                      ? resumePreview?.filename || 'Resume PDF'
+                      : resumePreviewState === 'missing'
+                        ? 'No resume uploaded for this candidate.'
+                        : resumePreviewState === 'error'
+                          ? resumePreviewError || 'Unable to load resume preview.'
+                          : ''}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => void fetchResumePreview(session.id)}>
+                    Refresh
+                  </Button>
+                  {resolvedResumeUrl && (
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={resolvedResumeUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink className="h-4 w-4" />
+                        Open
+                      </a>
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 overflow-hidden rounded-lg border">
+                {resolvedResumeUrl ? (
+                  <iframe src={resolvedResumeUrl} title="Candidate resume preview" className="h-[640px] w-full" />
+                ) : (
+                  <div className="flex h-[240px] items-center justify-center bg-muted/20 p-6 text-sm text-muted-foreground">
+                    Resume PDF not available yet. Upload a resume to the `resumes` storage bucket and set
+                    `candidates.resume_storage_path`, or attach a PDF artifact to this session.
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
         </section>
@@ -893,7 +1270,6 @@ function InterviewerView() {
               />
               <AIAssessmentsPanel sessionId={session.id} />
 
-              {/* Say Meter - Performance Health Indicator */}
               {analytics.sayMeter && (
                 <SayMeter
                   score={analytics.sayMeter.score}
@@ -903,27 +1279,24 @@ function InterviewerView() {
                 />
               )}
 
-              {/* Dynamic AI Suggestions */}
               <SuggestionsPanel
                 suggestions={analytics.suggestions}
                 loading={analytics.loading}
                 onDismiss={analytics.dismissSuggestion}
                 onApply={(suggestion) => {
                   console.log('Apply suggestion:', suggestion)
-                  // Could inject into AI prompt or show to interviewer
                 }}
               />
             </>
           )}
 
-          {/* Debug Controls (show when no scores or for manual trigger) */}
           {scores.length === 0 && (
-            <Card className="bg-amber-50/90 border-amber-200">
+            <Card className="border-amber-200 bg-amber-50/90 dark:bg-amber-950/30">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <h4 className="text-sm font-semibold text-amber-900">No Scores Yet</h4>
-                    <p className="text-xs text-amber-700 mt-1">
+                    <h4 className="text-sm font-semibold text-amber-900 dark:text-amber-300">No Scores Yet</h4>
+                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
                       Scores generate automatically when rounds complete. Or trigger manually:
                     </p>
                   </div>
@@ -955,6 +1328,57 @@ function InterviewerView() {
             </Card>
           )}
 
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Role Widget Configuration</CardTitle>
+              <CardDescription>
+                Hiring manager configurable flows for candidate-side role widgets. Saved config streams live to candidate view.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Role family</p>
+                <Select value={widgetRoleFamily} onValueChange={setWidgetRoleFamily}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select role family" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roleWidgetFamilies.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={loadRoleWidgetTemplate}>
+                  Load Recommended Template
+                </Button>
+                <Button size="sm" onClick={saveRoleWidgetConfig} disabled={widgetConfigState === 'saving'}>
+                  {widgetConfigState === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Save Role Widget Config
+                </Button>
+              </div>
+
+              <Textarea
+                rows={12}
+                value={widgetConfigText}
+                onChange={(event) => setWidgetConfigText(event.target.value)}
+                placeholder='[{"id":"lane-1","title":"Lane","subtitle":"flow","steps":[{"id":"step-1","label":"Task","eta":"06s"}]}]'
+                className="font-mono text-xs"
+              />
+
+              {widgetConfigState === 'saved' && (
+                <p className="text-xs text-emerald-600">Role widget configuration saved.</p>
+              )}
+              {widgetConfigError && (
+                <p className="text-xs text-destructive">{widgetConfigError}</p>
+              )}
+            </CardContent>
+          </Card>
+
           <GatePanel
             overall={gateData.overall}
             confidence={gateData.confidence}
@@ -962,11 +1386,21 @@ function InterviewerView() {
             redFlags={gateData.redFlags}
             truthLog={gateData.truthLog}
             followups={mergedGateFollowups}
+            onDecision={sendDecision}
+            onAction={(action) => {
+              if (action === 'escalate') {
+                void sendAction('escalate_difficulty')
+              }
+            }}
+            onAddFollowup={async (followup) => {
+              await sendAction('manual_followup', { followup })
+            }}
           />
-          <Card className="bg-white/90">
+
+          <Card>
             <CardHeader className="py-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold">Live Controls</h3>
+                <CardTitle className="text-base">Live Controls</CardTitle>
                 <Button variant="ghost" size="sm" onClick={() => setShowControls((prev) => !prev)}>
                   {showControls ? 'Hide' : 'Show'}
                 </Button>
@@ -974,43 +1408,45 @@ function InterviewerView() {
             </CardHeader>
             {showControls && (
               <CardContent className="space-y-4">
-                <div className="grid gap-4 rounded-2xl border border-ink-100 bg-white px-4 py-4">
+                <div className="grid gap-4 rounded-lg border p-4">
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                         Curveball
                       </label>
                       <div className="flex items-center gap-2">
-                        <Select value={curveball} onChange={(e) => setCurveball(e.target.value)}>
-                          <option value="budget_cut">Budget cut</option>
-                          <option value="security_concern">Security concern</option>
-                          <option value="timeline_mismatch">Timeline mismatch</option>
-                          <option value="competitor_pressure">Competitor pressure</option>
+                        <Select value={curveball} onValueChange={setCurveball}>
+                          <SelectTrigger className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="budget_cut">Budget cut</SelectItem>
+                            <SelectItem value="security_concern">Security concern</SelectItem>
+                            <SelectItem value="timeline_mismatch">Timeline mismatch</SelectItem>
+                            <SelectItem value="competitor_pressure">Competitor pressure</SelectItem>
+                          </SelectContent>
                         </Select>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => injectCurveball(curveball)}
-                        >
+                        <Button variant="outline" size="sm" onClick={() => injectCurveball(curveball)}>
                           Inject
                         </Button>
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                         Persona
                       </label>
                       <div className="flex items-center gap-2">
-                        <Select value={persona} onChange={(e) => setPersona(e.target.value)}>
-                          <option value="neutral">Neutral</option>
-                          <option value="skeptical">Skeptical</option>
-                          <option value="interested">Interested</option>
+                        <Select value={persona} onValueChange={setPersona}>
+                          <SelectTrigger className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="neutral">Neutral</SelectItem>
+                            <SelectItem value="skeptical">Skeptical</SelectItem>
+                            <SelectItem value="interested">Interested</SelectItem>
+                          </SelectContent>
                         </Select>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => switchPersona(persona)}
-                        >
+                        <Button variant="outline" size="sm" onClick={() => switchPersona(persona)}>
                           Switch
                         </Button>
                       </div>
@@ -1019,29 +1455,27 @@ function InterviewerView() {
 
                   <div className="space-y-4">
                     <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                         Difficulty
                       </label>
                       <div className="flex items-center gap-2">
-                        <Select
-                          value={escalationLevel}
-                          onChange={(e) => setEscalationLevel(e.target.value)}
-                        >
-                          <option value="L1">L1</option>
-                          <option value="L2">L2</option>
-                          <option value="L3">L3</option>
+                        <Select value={escalationLevel} onValueChange={setEscalationLevel}>
+                          <SelectTrigger className="h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="L1">L1</SelectItem>
+                            <SelectItem value="L2">L2</SelectItem>
+                            <SelectItem value="L3">L3</SelectItem>
+                          </SelectContent>
                         </Select>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => escalateDifficulty(escalationLevel)}
-                        >
+                        <Button variant="outline" size="sm" onClick={() => escalateDifficulty(escalationLevel)}>
                           Escalate
                         </Button>
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                         Round Control
                       </label>
                       <Button variant="outline" size="sm" className="w-full" onClick={endRound}>
@@ -1049,7 +1483,7 @@ function InterviewerView() {
                       </Button>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                         Gate Decision
                       </label>
                       <Button variant="secondary" size="sm" className="w-full" onClick={() => sendDecision('proceed')}>
@@ -1060,36 +1494,44 @@ function InterviewerView() {
                   </div>
                 </div>
 
-                <div className="space-y-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4">
-                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-red-700">
+                <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/30 px-4 py-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-red-700 dark:text-red-400">
                     Flag Red Flag
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-1">
-                      <label className="text-[10px] text-ink-500">Type</label>
-                      <Select value={flagType} onChange={(e) => setFlagType(e.target.value)}>
-                        {Object.entries(RED_FLAG_TYPES).map(([key, val]) => (
-                          <option key={key} value={key}>{val.label}</option>
-                        ))}
+                      <label className="text-[10px] text-muted-foreground">Type</label>
+                      <Select value={flagType} onValueChange={setFlagType}>
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(RED_FLAG_TYPES).map(([key, val]) => (
+                            <SelectItem key={key} value={key}>{val.label}</SelectItem>
+                          ))}
+                        </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] text-ink-500">Severity</label>
-                      <Select value={flagSeverity} onChange={(e) => setFlagSeverity(e.target.value as 'warning' | 'critical')}>
-                        <option value="warning">Warning</option>
-                        <option value="critical">Critical (auto-stop)</option>
+                      <label className="text-[10px] text-muted-foreground">Severity</label>
+                      <Select value={flagSeverity} onValueChange={(v) => setFlagSeverity(v as 'warning' | 'critical')}>
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="warning">Warning</SelectItem>
+                          <SelectItem value="critical">Critical (auto-stop)</SelectItem>
+                        </SelectContent>
                       </Select>
                     </div>
                   </div>
-                  <input
-                    type="text"
-                    className="w-full rounded-2xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-700"
+                  <Input
                     placeholder="Description (optional)..."
                     value={flagDescription}
                     onChange={(e) => setFlagDescription(e.target.value)}
                   />
                   <Button
-                    variant="danger"
+                    variant="destructive"
                     size="sm"
                     className="w-full"
                     onClick={() => {
@@ -1106,43 +1548,55 @@ function InterviewerView() {
                   </Button>
                 </div>
 
-                <div className="flex items-center justify-between rounded-2xl border border-signal-200 bg-signal-50 px-4 py-3">
+                <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3">
                   <div>
-                    <p className="text-sm font-semibold text-signal-900">Stop interview</p>
-                    <p className="text-xs text-signal-700">Ends the session immediately.</p>
+                    <p className="text-sm font-semibold text-destructive">Stop interview</p>
+                    <p className="text-xs text-destructive/80">Ends the session immediately.</p>
                   </div>
-                  <Button variant="danger" size="sm" onClick={() => sendDecision('stop')}>
+                  <Button variant="destructive" size="sm" onClick={() => sendDecision('stop')}>
                     <Slash className="mr-2 h-4 w-4" />
                     Stop
                   </Button>
                 </div>
-                <p className="text-[11px] text-ink-400">Applies to next response</p>
+                <p className="text-[11px] text-muted-foreground">Applies to next response</p>
               </CardContent>
             )}
           </Card>
-          <Card className="bg-white/90">
-            <CardHeader className="py-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold">Interviewer Notes</h3>
-                <Button variant="ghost" size="sm" onClick={() => setShowNotes((prev) => !prev)}>
-                  {showNotes ? 'Hide' : 'Show'}
-                </Button>
-              </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Interviewer Notes</CardTitle>
+              <CardDescription>Saved to session action logs when submitted.</CardDescription>
             </CardHeader>
-            {showNotes && (
-              <CardContent>
-                <textarea
-                  rows={6}
-                  className="w-full rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm"
-                  placeholder="Notes for final recommendation..."
-                />
-              </CardContent>
-            )}
+            <CardContent className="space-y-3">
+              <Textarea
+                rows={6}
+                value={notes}
+                onChange={(event) => setNotes(event.target.value)}
+                placeholder="Capture context for final recommendation, concern areas, and decision rationale..."
+              />
+              <Button
+                variant="secondary"
+                onClick={async () => {
+                  if (!notes.trim()) return
+                  await sendAction('interviewer_note', { note: notes })
+                  setNotes('')
+                }}
+              >
+                <BadgeCheck className="h-4 w-4" />
+                Save Note
+              </Button>
+              <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+                <ShieldAlert className="mb-2 h-4 w-4" />
+                All interviewer actions, notes, and magic-link events are logged for audit and post-assessment review.
+              </div>
+            </CardContent>
           </Card>
-          <Card className="bg-white/90">
+
+          <Card>
             <CardHeader className="py-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold">Follow-up Thread</h3>
+                <CardTitle className="text-base">Follow-up Thread</CardTitle>
                 <Button variant="ghost" size="sm" onClick={() => setShowFollowups((prev) => !prev)}>
                   {showFollowups ? 'Hide' : 'Show'}
                 </Button>
@@ -1150,18 +1604,46 @@ function InterviewerView() {
             </CardHeader>
             {showFollowups && (
               <CardContent className="space-y-4">
-              <div className="space-y-3 rounded-2xl border border-ink-100 bg-white px-4 py-3">
-                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">
-                  Add Follow-up
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    className="flex-1 rounded-2xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-700"
-                    placeholder="Add a follow-up question..."
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        const value = (event.currentTarget.value || '').trim()
+                <div className="space-y-3 rounded-lg border p-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                    Add Follow-up
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="Add a follow-up question..."
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          const value = (event.currentTarget.value || '').trim()
+                          if (!value) return
+                          const optimisticId = `local-${Date.now()}`
+                          setLocalFollowups((prev) => {
+                            if (prev.some((item) => item.question === value)) return prev
+                            return [
+                              ...prev,
+                              {
+                                id: optimisticId,
+                                question: value,
+                                round_number: targetRoundNumber ?? undefined,
+                                created_at: new Date().toISOString()
+                              }
+                            ]
+                          })
+                          sendAction('manual_followup', {
+                            followup: value,
+                            round_number: targetRoundNumber ?? null,
+                            target_round: targetRoundNumber ?? null
+                          })
+                          event.currentTarget.value = ''
+                        }
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(event) => {
+                        const input = (event.currentTarget
+                          .previousElementSibling as HTMLInputElement | null)
+                        const value = (input?.value || '').trim()
                         if (!value) return
                         const optimisticId = `local-${Date.now()}`
                         setLocalFollowups((prev) => {
@@ -1181,109 +1663,80 @@ function InterviewerView() {
                           round_number: targetRoundNumber ?? null,
                           target_round: targetRoundNumber ?? null
                         })
-                        event.currentTarget.value = ''
-                      }
-                    }}
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={(event) => {
-                      const input = (event.currentTarget
-                        .previousElementSibling as HTMLInputElement | null)
-                      const value = (input?.value || '').trim()
-                      if (!value) return
-                      const optimisticId = `local-${Date.now()}`
-                      setLocalFollowups((prev) => {
-                        if (prev.some((item) => item.question === value)) return prev
-                        return [
-                          ...prev,
-                          {
-                            id: optimisticId,
-                            question: value,
-                            round_number: targetRoundNumber ?? undefined,
-                            created_at: new Date().toISOString()
-                          }
-                        ]
-                      })
-                      sendAction('manual_followup', {
-                        followup: value,
-                        round_number: targetRoundNumber ?? null,
-                        target_round: targetRoundNumber ?? null
-                      })
-                      if (input) input.value = ''
-                    }}
-                  >
-                    Add
-                  </Button>
-                </div>
-                {mergedGateFollowups.length > 0 && (
-                  <div className="space-y-2 pt-2">
-                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">
-                      Suggestions
-                    </div>
-                    <ul className="space-y-2 text-sm text-ink-700">
-                      {mergedGateFollowups.map((item) => (
-                        <li
-                          key={item}
-                          className="flex items-center justify-between gap-3 rounded-2xl bg-ink-50 px-3 py-2"
-                        >
-                          <span>{item}</span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              const optimisticId = `local-${Date.now()}`
-                              setLocalFollowups((prev) => {
-                                if (prev.some((row) => row.question === item)) return prev
-                                return [
-                                  ...prev,
-                                  {
-                                    id: optimisticId,
-                                    question: item,
-                                    round_number: targetRoundNumber ?? undefined,
-                                    created_at: new Date().toISOString()
-                                  }
-                                ]
-                              })
-                              sendAction('manual_followup', {
-                                followup: item,
-                                round_number: targetRoundNumber ?? null,
-                                target_round: targetRoundNumber ?? null
-                              })
-                            }}
+                        if (input) input.value = ''
+                      }}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                  {mergedGateFollowups.length > 0 && (
+                    <div className="space-y-2 pt-2">
+                      <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                        Suggestions
+                      </div>
+                      <ul className="space-y-2 text-sm">
+                        {mergedGateFollowups.map((item) => (
+                          <li
+                            key={item}
+                            className="flex items-center justify-between gap-3 rounded-lg bg-muted/30 px-3 py-2"
                           >
-                            Ask now
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-              {followupThread.length === 0 && (
-                <div className="rounded-2xl bg-ink-50 px-4 py-3 text-sm text-ink-500">
-                  No follow-ups yet.
-                </div>
-              )}
-              {followupThread.map((item) => (
-                <div key={item.id} className="rounded-2xl bg-ink-50 px-4 py-3 text-sm">
-                  <div className="flex items-center justify-between text-xs text-ink-500">
-                    <span>Round {item.round_number ?? '-'}</span>
-                    <span>{item.source === 'manual' ? 'Manual' : 'Auto'}</span>
-                  </div>
-                  <p className="mt-2 font-semibold text-ink-900">Q: {item.question}</p>
-                  {item.answered ? (
-                    <p className="mt-2 text-ink-700">A: {item.answer}</p>
-                  ) : (
-                    <p className="mt-2 text-ink-500">Awaiting response.</p>
+                            <span>{item}</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const optimisticId = `local-${Date.now()}`
+                                setLocalFollowups((prev) => {
+                                  if (prev.some((row) => row.question === item)) return prev
+                                  return [
+                                    ...prev,
+                                    {
+                                      id: optimisticId,
+                                      question: item,
+                                      round_number: targetRoundNumber ?? undefined,
+                                      created_at: new Date().toISOString()
+                                    }
+                                  ]
+                                })
+                                sendAction('manual_followup', {
+                                  followup: item,
+                                  round_number: targetRoundNumber ?? null,
+                                  target_round: targetRoundNumber ?? null
+                                })
+                              }}
+                            >
+                              Ask now
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </div>
-              ))}
+                {followupThread.length === 0 && (
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                    No follow-ups yet.
+                  </div>
+                )}
+                {followupThread.map((item) => (
+                  <div key={item.id} className="rounded-lg border bg-muted/20 p-3 text-sm">
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Round {item.round_number ?? '-'}</span>
+                      <span>{item.source === 'manual' ? 'Manual' : 'Auto'}</span>
+                    </div>
+                    <p className="mt-2 font-semibold">Q: {item.question}</p>
+                    {item.answered ? (
+                      <p className="mt-2 text-muted-foreground">A: {item.answer}</p>
+                    ) : (
+                      <p className="mt-2 text-muted-foreground">Awaiting response.</p>
+                    )}
+                  </div>
+                ))}
               </CardContent>
             )}
           </Card>
         </aside>
+        </div>
       </div>
     </main>
   )

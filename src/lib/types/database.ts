@@ -239,6 +239,41 @@ export interface VoiceRealtimeRoundConfig {
   voice?: 'ash' | 'coral' | 'sage' | 'cedar' | 'marin' | 'ballad'
 }
 
+// 17. Voice Transcripts (Voice Analytics)
+export interface VoiceTranscript {
+  id: string
+  session_id: string
+  round_number: number
+  role: 'user' | 'assistant'
+  text: string
+  timestamp: string
+  word_count: number | null
+  created_at?: string
+}
+
+// 18. Voice Analysis (Voice Analytics)
+export interface VoiceAnalysis {
+  id: string
+  session_id: string
+  round_number: number
+  analysis_type: 'say_meter' | 'suggestion'
+
+  // Say Meter fields
+  meter_score: number | null
+  meter_factors: Record<string, any>
+  meter_reasoning: string | null
+
+  // Suggestion fields
+  suggestion_text: string | null
+  suggestion_category: 'context_injection' | 'curveball' | 'followup_question' | null
+  priority: 'low' | 'medium' | 'high' | 'critical' | null
+
+  // Metadata
+  triggered_at: string
+  dismissed: boolean
+  created_at?: string
+}
+
 // Helper types for MVP (temporary)
 export interface SessionWithDetails extends InterviewSession {
   candidate?: Candidate

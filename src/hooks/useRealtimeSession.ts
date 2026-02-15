@@ -13,7 +13,7 @@ export function useRealtimeSession(sessionId: string) {
   // Initial fetch
   useEffect(() => {
     const fetchSession = async () => {
-      const response = await fetch(`/api/session/${sessionId}`)
+      const response = await fetch(`/api/session/${sessionId}`, { cache: 'no-store' })
       if (response.ok) {
         const data = await response.json()
 
@@ -48,7 +48,7 @@ export function useRealtimeSession(sessionId: string) {
         },
         (payload) => {
           if (payload.new) {
-            setSession(payload.new as InterviewSession)
+            setSession((prev) => prev ? { ...prev, ...payload.new as InterviewSession } : payload.new as InterviewSession)
           }
         }
       )
@@ -89,7 +89,7 @@ export function useRealtimeSession(sessionId: string) {
         (payload) => {
           if (payload.new) {
             setScores((prev) => {
-              const index = prev.findIndex((s) => s.id === payload.new.id)
+              const index = prev.findIndex((s) => s.id === (payload.new as any).id)
               if (index >= 0) {
                 const updated = [...prev]
                 updated[index] = payload.new as Score

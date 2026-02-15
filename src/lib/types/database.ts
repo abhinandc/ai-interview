@@ -2,9 +2,19 @@
 
 export type SessionStatus = 'scheduled' | 'live' | 'completed' | 'aborted'
 export type RoundStatus = 'pending' | 'active' | 'completed' | 'skipped'
-export type RoundType = 'voice' | 'email' | 'text' | 'code'
+export type RoundType = 'voice' | 'email' | 'text' | 'code' | 'mcq'
 export type CandidateStatus = 'applied' | 'pi_scheduled' | 'pi_passed' | 'live_scheduled' | 'live_completed' | 'rejected' | 'advanced'
-export type Track = 'sales' | 'agentic_eng' | 'fullstack' | 'marketing' | 'implementation' | 'HR' | 'security'
+export type Track =
+  | 'sales'
+  | 'agentic_eng'
+  | 'fullstack'
+  | 'marketing'
+  | 'implementation'
+  | 'HR'
+  | 'security'
+  | 'data'
+  | 'knowledge'
+  | 'data_steward'
 
 // 1. Job Profiles
 export interface JobProfile {
@@ -18,6 +28,8 @@ export interface JobProfile {
   must_have_flags: string[]
   disqualifiers: string[]
   gating_thresholds: Record<string, any>
+  experience_years_min?: number | null
+  experience_years_max?: number | null
   created_at?: string
 }
 
@@ -25,39 +37,45 @@ export interface JobProfile {
 export interface AssessmentBlueprint {
   id: string
   track: Track
-  module_name: string
-  difficulty: string
-  question_templates: Record<string, any>
-  rubric: Record<string, any>
+  competency: string
+  difficulty: 'L1' | 'L2' | 'L3' | string
+  format: 'mcq' | 'ranking' | 'scenario' | 'short_answer' | string
+  scoring_rubric: Record<string, any>
   red_flags: Record<string, any>
-  time_limits: Record<string, any>
+  anti_cheat_constraints: Record<string, any>
+  evidence_requirements: Record<string, any>
+  time_limit_minutes: number
+  // Legacy/optional fields
+  module_name?: string
+  question_templates?: Record<string, any>
+  rubric?: Record<string, any>
+  time_limits?: Record<string, any>
   created_at?: string
 }
 
-// 3. Agents Registry
-export interface AgentRegistry {
+// Generated Question Items
+export interface GeneratedQuestionItem {
   id: string
-  agent_type: string
-  provider: 'ElevenLabs' | 'internal'
-  agent_id: string
-  supported_tracks: Track[]
-  region: 'US' | 'IN'
-  voice_profile: Record<string, any>
+  blueprint_id: string
+  track: Track
+  competency: string
+  difficulty: string
+  format: string
+  prompt: string
+  expected_output: string | null
+  scoring_rubric: Record<string, any>
+  red_flags: Record<string, any>
+  anti_cheat_constraints: Record<string, any>
+  evidence_requirements: Record<string, any>
+  time_limit_minutes: number
+  version: number
+  hash: string
+  status: 'draft' | 'validated' | 'rejected' | 'retired'
+  validation_report: Record<string, any> | null
   created_at?: string
 }
 
-// 4. Models Registry
-export interface ModelRegistry {
-  id: string
-  model_key: string
-  provider: string
-  purpose: string
-  edgeadmin_endpoint: string | null
-  budget_policy: Record<string, any>
-  created_at?: string
-}
-
-// 5. Candidates
+// 3. Candidates
 export interface Candidate {
   id: string
   rippling_candidate_id: string
@@ -134,6 +152,7 @@ export interface LiveEvent {
   id: string
   session_id: string
   event_type: string
+  actor?: string
   payload: Record<string, any>
   created_at: string
 }
@@ -152,6 +171,9 @@ export interface Score {
   confidence: number
   evidence_quotes: Array<{ dimension: string; quote: string; line?: number }>
   recommendation: 'proceed' | 'caution' | 'stop'
+  recommended_followups?: string[]
+  overridden_by?: string | null
+  override_reason?: string | null
   created_at?: string
 }
 
@@ -161,22 +183,13 @@ export interface Artifact {
   session_id: string
   artifact_type: string
   url: string
+  content?: string | null
+  round_number?: number | null
   metadata: Record<string, any>
   created_at?: string
 }
 
-// 12. Rippling Writebacks
-export interface RipplingWriteback {
-  id: string
-  candidate_id: string
-  action: 'note' | 'tag' | 'stage_move'
-  payload: Record<string, any>
-  status: 'queued' | 'sent' | 'failed'
-  error: string | null
-  created_at?: string
-}
-
-// Helper types for MVP (temporary)
+// Helper types
 export interface SessionWithDetails extends InterviewSession {
   candidate?: Candidate
   job?: JobProfile

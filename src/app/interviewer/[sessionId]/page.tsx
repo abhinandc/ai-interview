@@ -1,10 +1,17 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { AlertTriangle, CheckCircle2, Slash } from 'lucide-react'
 import { useParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { Progress } from '@/components/ui/progress'
 import { GatePanel } from '@/components/GatePanel'
+import type { RedFlagEntry } from '@/components/GatePanel'
+import { RED_FLAG_TYPES } from '@/lib/constants/red-flags'
+import type { RedFlagTypeKey } from '@/lib/constants/red-flags'
 import { SessionProvider, useSession } from '@/contexts/SessionContext'
 
 type TranscriptEntry = {
@@ -19,14 +26,41 @@ type ActionEntry = {
   time: string
 }
 
-function buildGateData(scores: any[]) {
+function buildGateData(scores: any[], events: any[]) {
+  const eventFollowups = (events || [])
+    .filter((event) => event.event_type === 'followup_question')
+    .map((event) => String(event.payload?.question || '').trim())
+    .filter(Boolean)
+
+  const manualFollowups = (events || [])
+    .filter(
+      (event) =>
+        event.event_type === 'interviewer_action' &&
+        event.payload?.action_type === 'manual_followup'
+    )
+    .map((event) => String(event.payload?.followup || '').trim())
+    .filter(Boolean)
+
+  // Merge red flags from live_events
+  const eventRedFlags: RedFlagEntry[] = (events || [])
+    .filter((e) => e.event_type === 'red_flag_detected')
+    .map((e) => ({
+      label: formatFlagType(e.payload?.flag_type || 'red_flag'),
+      detail: e.payload?.description,
+      source: e.actor || 'system',
+      severity: (e.payload?.severity || 'warning') as 'critical' | 'warning',
+      auto_stop: e.payload?.auto_stop || false,
+      created_at: e.created_at
+    }))
+
   if (!scores || scores.length === 0) {
     return {
       overall: 0,
       confidence: 0,
       dimensions: [],
-      redFlags: [],
-      followups: []
+      redFlags: eventRedFlags,
+      truthLog: [],
+      followups: Array.from(new Set([...eventFollowups, ...manualFollowups]))
     }
   }
 
@@ -42,13 +76,31 @@ function buildGateData(scores: any[]) {
 
     const followups = normalizeFollowups(latest.recommended_followups || latest.followups)
     const derived = followups.length === 0 ? deriveFollowupsFromDimensions(dimensions) : followups
+    const mergedFollowups = Array.from(
+      new Set([...eventFollowups, ...manualFollowups, ...derived])
+    )
+
+    const scoreRedFlags = normalizeRedFlags(latest.red_flags)
+    // Merge + deduplicate by label
+    const seen = new Set<string>()
+    const mergedRedFlags: RedFlagEntry[] = []
+    for (const flag of [...eventRedFlags, ...scoreRedFlags]) {
+      const key = `${flag.label}-${flag.source}`
+      if (!seen.has(key)) {
+        seen.add(key)
+        mergedRedFlags.push(flag)
+      }
+    }
 
     return {
       overall: Number(latest.overall_score) || 0,
       confidence: Number(latest.confidence) || 0,
       dimensions,
-      redFlags: normalizeRedFlags(latest.red_flags),
-      followups: derived
+      redFlags: mergedRedFlags,
+      truthLog: normalizeEvidenceQuotes(
+        latest.evidence_quotes || latest.evidence || latest.truth_log
+      ),
+      followups: mergedFollowups
     }
   }
 
@@ -71,30 +123,71 @@ function buildGateData(scores: any[]) {
     max: maxPerDimension
   }))
 
-  const followups = deriveFollowupsFromDimensions(dimensions)
+  const followups = Array.from(
+    new Set([
+      ...eventFollowups,
+      ...manualFollowups,
+      ...deriveFollowupsFromDimensions(dimensions)
+    ])
+  )
 
   return {
     overall,
     confidence,
     dimensions,
     redFlags: [],
+    truthLog: [],
     followups
   }
 }
 
-function normalizeRedFlags(redFlags: any) {
+function normalizeRedFlags(redFlags: any): RedFlagEntry[] {
   if (!redFlags) return []
   if (Array.isArray(redFlags)) {
     return redFlags.map((flag) => ({
-      label: flag.label || flag.type || 'Red flag',
-      detail: flag.detail || flag.description
+      label: flag.label || flag.flag_type || flag.type || 'Red flag',
+      detail: flag.detail || flag.description,
+      severity: flag.severity || 'warning',
+      source: flag.source || 'system',
+      auto_stop: flag.auto_stop || false,
+      created_at: flag.created_at
     }))
   }
   if (typeof redFlags === 'object') {
     return Object.entries(redFlags).map(([label, detail]) => ({
       label,
-      detail: typeof detail === 'string' ? detail : undefined
+      detail: typeof detail === 'string' ? detail : undefined,
+      severity: 'warning' as const,
+      source: 'system'
     }))
+  }
+  return []
+}
+
+function formatFlagType(flagType: string): string {
+  const entry = RED_FLAG_TYPES[flagType as RedFlagTypeKey]
+  if (entry) return entry.label
+  return flagType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function normalizeEvidenceQuotes(evidence: any) {
+  if (!evidence) return []
+  if (Array.isArray(evidence)) {
+    return evidence
+      .map((item) => ({
+        dimension: String(item.dimension || item.label || 'Evidence').replace(/_/g, ' '),
+        quote: String(item.quote || item.evidence || item.text || '').trim(),
+        line: item.line
+      }))
+      .filter((item) => item.quote.length > 0)
+  }
+  if (typeof evidence === 'object') {
+    return Object.entries(evidence)
+      .map(([dimension, quote]) => ({
+        dimension: String(dimension || 'Evidence').replace(/_/g, ' '),
+        quote: String(quote || '').trim()
+      }))
+      .filter((item) => item.quote.length > 0)
   }
   return []
 }
@@ -153,7 +246,11 @@ function buildActionLog(events: any[]) {
     'artifact_submitted',
     'scoring_completed',
     'interviewer_action',
-    'candidate_action'
+    'candidate_action',
+    'difficulty_adaptation',
+    'red_flag_detected',
+    'auto_stop_triggered',
+    'session_force_stopped'
   ])
 
   for (const event of events || []) {
@@ -161,12 +258,49 @@ function buildActionLog(events: any[]) {
 
     const time = new Date(event.created_at).toLocaleTimeString()
     const roundNumber = event.payload?.round_number
-    const detail =
-      event.event_type === 'interviewer_action'
-        ? event.payload?.action_type
-        : event.event_type === 'candidate_action'
-          ? event.payload?.message || event.payload?.action
-          : event.payload?.artifact_type || event.payload?.action || roundNumber
+    const detail = (() => {
+      if (event.event_type === 'interviewer_action') {
+        const actionType = event.payload?.action_type
+        if (actionType === 'inject_curveball') {
+          return `inject_curveball: ${event.payload?.curveball || 'unspecified'}`
+        }
+        if (actionType === 'switch_persona') {
+          return `switch_persona: ${event.payload?.persona || 'unspecified'}`
+        }
+        if (actionType === 'escalate_difficulty') {
+          return `escalate_difficulty: ${event.payload?.level || 'L3'}`
+        }
+        return actionType
+      }
+      if (event.event_type === 'candidate_action') {
+        return event.payload?.message || event.payload?.action
+      }
+      if (event.event_type === 'difficulty_adaptation') {
+        const p = event.payload || {}
+        return `Round ${p.round_adapted}: ${p.from_difficulty} → ${p.to_difficulty} (scored ${p.trigger_score})`
+      }
+      if (event.event_type === 'red_flag_detected') {
+        const p = event.payload || {}
+        return `${formatFlagType(p.flag_type || 'flag')} [${p.severity || 'warning'}] — ${event.actor || 'system'}`
+      }
+      if (event.event_type === 'auto_stop_triggered') {
+        return event.payload?.reason || 'Critical red flag triggered auto-stop'
+      }
+      if (event.event_type === 'session_force_stopped') {
+        return event.payload?.reason || 'Session force stopped'
+      }
+      if (event.event_type === 'round_started' || event.event_type === 'round_completed') {
+        return undefined
+      }
+      if (event.event_type === 'scoring_completed') {
+        return `Round ${roundNumber} • ${event.payload?.dimensions || 0} dimensions`
+      }
+      if (event.event_type === 'artifact_submitted') {
+        const t = event.payload?.artifact_type
+        return t ? `${t} (Round ${roundNumber})` : `Round ${roundNumber}`
+      }
+      return event.payload?.artifact_type || event.payload?.action || undefined
+    })()
 
     const label =
       event.event_type === 'round_started'
@@ -175,7 +309,15 @@ function buildActionLog(events: any[]) {
           ? `Round ${roundNumber} completed`
           : event.event_type === 'candidate_action'
             ? 'Candidate message'
-            : event.event_type.replace(/_/g, ' ')
+            : event.event_type === 'difficulty_adaptation'
+              ? 'Difficulty auto-adjusted'
+              : event.event_type === 'red_flag_detected'
+                ? 'Red flag detected'
+                : event.event_type === 'auto_stop_triggered'
+                  ? 'Auto-stop triggered'
+                  : event.event_type === 'session_force_stopped'
+                    ? 'Session force stopped'
+                    : event.event_type.replace(/_/g, ' ')
 
     actions.push({
       action: label,
@@ -189,8 +331,30 @@ function buildActionLog(events: any[]) {
 
 function InterviewerView() {
   const { session, scores, events, rounds } = useSession()
+  const [localFollowups, setLocalFollowups] = useState<
+    Array<{ id: string; question: string; round_number?: number; created_at: string }>
+  >([])
+  const [serverFollowups, setServerFollowups] = useState<
+    Array<{
+      id: string
+      question: string
+      round_number?: number | null
+      source?: string
+      answered?: boolean
+      answer?: string
+    }>
+  >([])
+  const [showNotes, setShowNotes] = useState(false)
+  const [showFollowups, setShowFollowups] = useState(false)
+  const [showControls, setShowControls] = useState(false)
+  const [curveball, setCurveball] = useState('budget_cut')
+  const [persona, setPersona] = useState('skeptical')
+  const [escalationLevel, setEscalationLevel] = useState('L3')
+  const [flagType, setFlagType] = useState<string>('custom')
+  const [flagDescription, setFlagDescription] = useState('')
+  const [flagSeverity, setFlagSeverity] = useState<'warning' | 'critical'>('warning')
 
-  const gateData = useMemo(() => buildGateData(scores as any[]), [scores])
+  const gateData = useMemo(() => buildGateData(scores as any[], events as any[]), [scores, events])
   const transcript = useMemo(() => buildTranscript(events as any[]), [events])
   const actionLog = useMemo(() => buildActionLog(events as any[]), [events])
   const noAnswerFlag = useMemo(() => {
@@ -198,6 +362,16 @@ function InterviewerView() {
       ['insufficient_response', 'no_evidence'].includes(flag.label)
     )
   }, [gateData.redFlags])
+  const autoStopTriggered = useMemo(() => {
+    return (events || []).some(
+      (e: any) =>
+        e.event_type === 'auto_stop_triggered' ||
+        e.event_type === 'session_force_stopped' ||
+        (e.event_type === 'red_flag_detected' &&
+          e.payload?.auto_stop === true &&
+          e.payload?.severity === 'critical')
+    )
+  }, [events])
   const roundTimeline = useMemo(() => {
     return (rounds || []).map((round) => {
       const startedAt = round.started_at ? new Date(round.started_at) : null
@@ -213,12 +387,148 @@ function InterviewerView() {
       }
     })
   }, [rounds])
+  const followupThread = useMemo(() => {
+    const questions = (events || [])
+      .filter((event: any) => event.event_type === 'followup_question')
+      .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
+    const answers = (events || [])
+      .filter((event: any) => event.event_type === 'followup_answer')
+      .sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
+    const answerMap = new Map<string, string>()
+    for (const answer of answers) {
+      if (answer.payload?.question_id) {
+        answerMap.set(answer.payload.question_id, answer.payload?.answer || '')
+      }
+    }
+
+    const manualQuestions = (events || [])
+      .filter(
+        (event: any) =>
+          event.event_type === 'interviewer_action' &&
+          event.payload?.action_type === 'manual_followup' &&
+          event.payload?.followup
+      )
+      .map((event: any) => ({
+        id: event.payload?.question_id || `manual-${event.id}`,
+        question: event.payload?.followup || '',
+        round_number: event.payload?.round_number ?? event.payload?.target_round,
+        source: 'manual',
+        created_at: event.created_at
+      }))
+
+    const localQuestions = localFollowups.map((item) => ({
+      id: item.id,
+      question: item.question,
+      round_number: item.round_number,
+      source: 'manual',
+      created_at: item.created_at
+    }))
+
+    const serverQuestions = serverFollowups.map((item) => ({
+      id: item.id,
+      question: item.question,
+      round_number: item.round_number,
+      source: item.source || 'manual',
+      created_at: new Date().toISOString()
+    }))
+
+    const questionItems = [
+      ...questions.map((question: any) => ({
+        id: question.payload?.question_id,
+        question: question.payload?.question || '',
+        round_number: question.payload?.round_number,
+        source: question.payload?.source || 'auto',
+        created_at: question.created_at
+      })),
+      ...manualQuestions,
+      ...localQuestions,
+      ...serverQuestions
+    ]
+      .filter((item) => item.question)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+
+    const deduped = new Map<string, any>()
+    for (const item of questionItems) {
+      const key = item.id || `${item.question}-${item.created_at}`
+      if (!deduped.has(key)) {
+        deduped.set(key, item)
+      }
+    }
+
+    return Array.from(deduped.values()).map((question: any) => ({
+      id: question.id,
+      question: question.question,
+      round_number: question.round_number,
+      source: question.source,
+      answered: question.id ? answerMap.has(question.id) : false,
+      answer: question.id ? answerMap.get(question.id) : undefined
+    }))
+  }, [events, localFollowups, serverFollowups])
+
+  useEffect(() => {
+    if (!session?.id) return
+    const loadThread = async () => {
+      try {
+        const response = await fetch('/api/followup/thread', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({ session_id: session.id })
+        })
+        if (response.ok) {
+          const data = await response.json()
+          if (Array.isArray(data?.thread)) {
+            setServerFollowups(data.thread)
+          }
+        }
+      } catch {
+        // Best-effort sync on refresh.
+      }
+    }
+    loadThread()
+  }, [session?.id])
+  const mergedGateFollowups = useMemo(() => {
+    const local = localFollowups.map((item) => item.question).filter(Boolean)
+    return Array.from(new Set([...(gateData.followups || []), ...local]))
+  }, [gateData.followups, localFollowups])
 
   if (!session) return null
 
   const candidateName = (session as any).candidate?.name || 'Candidate'
   const jobTitle = (session as any).job?.title || 'Role'
   const jobLevel = (session as any).job?.level_band || 'mid'
+  const jobLevelLabel =
+    jobLevel === 'junior' ? 'Junior' : jobLevel === 'senior' ? 'Senior' : 'Mid'
+  const totalRounds = roundTimeline.length
+  const completedRounds = roundTimeline.filter((r) => r.status === 'completed').length
+  const roundProgress = totalRounds ? (completedRounds / totalRounds) * 100 : 0
+  const activeRound = roundTimeline.find((r) => r.status === 'active')
+  const pendingRound = roundTimeline.find((r) => r.status === 'pending')
+  const currentRoundLabel = activeRound
+    ? `Round ${activeRound.round_number} • ${activeRound.title.replace(/^Round\s*\d+\s*:?\s*/i, '')}`
+    : pendingRound
+      ? `Next round • ${pendingRound.title}`
+      : null
+  const candidateInsights = (session as any).candidate_insights || {}
+  const resumeSkills = Array.isArray(candidateInsights.resume_skills)
+    ? candidateInsights.resume_skills.filter(Boolean).slice(0, 3)
+    : []
+  const insightLine = [
+    candidateInsights.interview_level ? `Interview level ${candidateInsights.interview_level}` : null,
+    typeof candidateInsights.pi_score_overall === 'number'
+      ? `PI ${candidateInsights.pi_score_overall}`
+      : null,
+    resumeSkills.length ? `Skills: ${resumeSkills.join(', ')}` : null
+  ]
+    .filter(Boolean)
+    .join(' • ')
+  const targetRoundNumber =
+    (rounds || []).find((round) => round.status === 'active')?.round_number ??
+    (rounds || []).find((round) => round.status === 'pending')?.round_number ??
+    (rounds || [])[0]?.round_number ??
+    null
 
   const sendAction = async (action_type: string, payload?: Record<string, any>) => {
     await fetch('/api/interviewer/action', {
@@ -269,43 +579,97 @@ function InterviewerView() {
     }
   }
 
-  const escalateDifficulty = async () => {
-    const nextRound = (rounds || []).find((round) => round.status === 'pending')
+  const escalateDifficulty = async (level?: string) => {
     await sendAction('escalate_difficulty', {
-      target_round: nextRound?.round_number ?? null
+      target_round: null,
+      level: level || 'L3'
+    })
+  }
+
+  const endRound = async () => {
+    const activeRound = (rounds || []).find((round) => round.status === 'active')
+    if (!activeRound) return
+    await sendAction('end_round', { round_number: activeRound.round_number })
+    await fetch('/api/round/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: session.id,
+        round_number: activeRound.round_number
+      })
+    })
+  }
+
+  const injectCurveball = async (curveball: string) => {
+    await sendAction('inject_curveball', {
+      curveball,
+      target_round: null
+    })
+  }
+
+  const switchPersona = async (persona: string) => {
+    await sendAction('switch_persona', {
+      persona,
+      target_round: null
     })
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#eef6ff_0%,#f7f7fb_35%,#fefefe_100%)] px-6 py-10">
-      <div className="mx-auto grid w-full max-w-6xl gap-6 lg:grid-cols-[1.1fr,1fr]">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#eef6ff_0%,#f7f7fb_35%,#fefefe_100%)] px-4 py-8 sm:px-6">
+      <div className="mx-auto grid w-full max-w-6xl gap-5 lg:grid-cols-[1.1fr,1fr]">
         <section className="space-y-6">
           <Card className="bg-white/90">
-            <CardHeader className="space-y-2">
+            <CardHeader className="space-y-1 pb-4">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">
-                  Live Interview
-                </p>
-                <Badge tone="sky">{session.status}</Badge>
+                <Badge tone="sky" className="text-[11px] flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                  {session.status}
+                </Badge>
               </div>
               <div>
-                <h1 className="text-xl font-semibold text-ink-900">{candidateName}</h1>
-                <p className="text-sm text-ink-500">
-                  {jobTitle} • Level {jobLevel}
+                <h1 className="text-2xl font-semibold text-ink-900">{candidateName}</h1>
+                <p className="mt-1 text-sm text-ink-600">
+                  {jobTitle} • {jobLevelLabel}
                 </p>
+                {insightLine && (
+                  <p className="mt-2 text-xs text-ink-400">{insightLine}</p>
+                )}
+                {currentRoundLabel && (
+                  <p className="mt-2 text-xs text-ink-500">{currentRoundLabel}</p>
+                )}
+                {totalRounds > 0 && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex items-center justify-between text-xs text-ink-500">
+                      <span>Round progress</span>
+                      <span>{completedRounds}/{totalRounds}</span>
+                    </div>
+                    <Progress value={roundProgress} />
+                  </div>
+                )}
               </div>
             </CardHeader>
           </Card>
 
-          <Card className="animate-rise-in bg-white/90">
-            <CardHeader className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Live Transcript</h2>
-                <Badge tone="sky">Monitoring</Badge>
+          {autoStopTriggered && (
+            <div className="rounded-2xl border-2 border-red-400 bg-red-50 px-5 py-4 animate-pulse">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-red-600" />
+                <div>
+                  <p className="font-semibold text-red-800">Session Auto-Stopped</p>
+                  <p className="text-sm text-red-600">
+                    A critical red flag triggered automatic session termination.
+                  </p>
+                </div>
               </div>
-              <p className="text-sm text-ink-500">
-                Real-time conversation and candidate responses.
-              </p>
+            </div>
+          )}
+
+          <Card className="animate-rise-in bg-white/90">
+            <CardHeader className="space-y-1">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold">Transcript</h2>
+                <Badge tone="neutral" className="text-[11px]">Live</Badge>
+              </div>
             </CardHeader>
             <CardContent className="space-y-3">
               {noAnswerFlag && (
@@ -315,7 +679,7 @@ function InterviewerView() {
               )}
               {transcript.length === 0 && (
                 <div className="rounded-2xl bg-ink-50 px-4 py-3 text-sm text-ink-500">
-                  Transcript will populate once the conversation starts.
+                  Waiting for conversation.
                 </div>
               )}
               {transcript.map((entry, index) => (
@@ -330,47 +694,15 @@ function InterviewerView() {
             </CardContent>
           </Card>
 
-          <Card className="bg-white/90">
-            <CardHeader>
-              <h3 className="text-base font-semibold">Round Timeline</h3>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {roundTimeline.length === 0 && (
-                <div className="rounded-2xl bg-ink-50 px-4 py-3 text-sm text-ink-500">
-                  Round timeline will appear once the scope package is loaded.
-                </div>
-              )}
-              {roundTimeline.map((round) => (
-                <div
-                  key={round.round_number}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm"
-                >
-                  <div>
-                    <div className="font-semibold text-ink-900">
-                      Round {round.round_number}: {round.title}
-                    </div>
-                    <div className="text-xs text-ink-500">
-                      {round.startedAt
-                        ? `${round.startedAt.toLocaleTimeString()} → ${round.endsAt?.toLocaleTimeString()}`
-                        : `Duration: ${round.durationMinutes} min`}
-                    </div>
-                  </div>
-                  <Badge tone={round.status === 'active' ? 'sky' : round.status === 'completed' ? 'emerald' : 'ink'}>
-                    {round.status}
-                  </Badge>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
 
           <Card className="bg-white/90">
             <CardHeader>
-              <h3 className="text-base font-semibold">Candidate Action Log</h3>
+              <h3 className="text-base font-semibold">Action Log</h3>
             </CardHeader>
             <CardContent className="space-y-2">
               {actionLog.length === 0 && (
                 <div className="rounded-2xl bg-ink-50 px-4 py-3 text-sm text-ink-500">
-                  Waiting for candidate actions.
+                  No actions yet.
                 </div>
               )}
               {actionLog.map((entry, index) => (
@@ -390,28 +722,328 @@ function InterviewerView() {
             confidence={gateData.confidence}
             dimensions={gateData.dimensions}
             redFlags={gateData.redFlags}
-            followups={gateData.followups}
-            onDecision={sendDecision}
-            onAction={(action) => {
-              if (action === 'escalate') {
-                escalateDifficulty()
-              }
-            }}
-            onAddFollowup={async (followup) => {
-              await sendAction('manual_followup', { followup })
-            }}
+            truthLog={gateData.truthLog}
+            followups={mergedGateFollowups}
           />
           <Card className="bg-white/90">
-            <CardHeader>
-              <h3 className="text-base font-semibold">Interviewer Notes</h3>
+            <CardHeader className="py-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold">Live Controls</h3>
+                <Button variant="ghost" size="sm" onClick={() => setShowControls((prev) => !prev)}>
+                  {showControls ? 'Hide' : 'Show'}
+                </Button>
+              </div>
             </CardHeader>
-            <CardContent>
-              <textarea
-                rows={6}
-                className="w-full rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm"
-                placeholder="Capture context for the final recommendation..."
-              />
-            </CardContent>
+            {showControls && (
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 rounded-2xl border border-ink-100 bg-white px-4 py-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                        Curveball
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <Select value={curveball} onChange={(e) => setCurveball(e.target.value)}>
+                          <option value="budget_cut">Budget cut</option>
+                          <option value="security_concern">Security concern</option>
+                          <option value="timeline_mismatch">Timeline mismatch</option>
+                          <option value="competitor_pressure">Competitor pressure</option>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => injectCurveball(curveball)}
+                        >
+                          Inject
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                        Persona
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <Select value={persona} onChange={(e) => setPersona(e.target.value)}>
+                          <option value="neutral">Neutral</option>
+                          <option value="skeptical">Skeptical</option>
+                          <option value="interested">Interested</option>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => switchPersona(persona)}
+                        >
+                          Switch
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                        Difficulty
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={escalationLevel}
+                          onChange={(e) => setEscalationLevel(e.target.value)}
+                        >
+                          <option value="L1">L1</option>
+                          <option value="L2">L2</option>
+                          <option value="L3">L3</option>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => escalateDifficulty(escalationLevel)}
+                        >
+                          Escalate
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                        Round Control
+                      </label>
+                      <Button variant="outline" size="sm" className="w-full" onClick={endRound}>
+                        End round
+                      </Button>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                        Gate Decision
+                      </label>
+                      <Button variant="secondary" size="sm" className="w-full" onClick={() => sendDecision('proceed')}>
+                        <CheckCircle2 className="mr-2 h-4 w-4" />
+                        Proceed
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-red-700">
+                    Flag Red Flag
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-ink-500">Type</label>
+                      <Select value={flagType} onChange={(e) => setFlagType(e.target.value)}>
+                        {Object.entries(RED_FLAG_TYPES).map(([key, val]) => (
+                          <option key={key} value={key}>{val.label}</option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-ink-500">Severity</label>
+                      <Select value={flagSeverity} onChange={(e) => setFlagSeverity(e.target.value as 'warning' | 'critical')}>
+                        <option value="warning">Warning</option>
+                        <option value="critical">Critical (auto-stop)</option>
+                      </Select>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    className="w-full rounded-2xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-700"
+                    placeholder="Description (optional)..."
+                    value={flagDescription}
+                    onChange={(e) => setFlagDescription(e.target.value)}
+                  />
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => {
+                      sendAction('flag_red_flag', {
+                        flag_type: flagType,
+                        description: flagDescription || RED_FLAG_TYPES[flagType as RedFlagTypeKey]?.description || '',
+                        severity: flagSeverity
+                      })
+                      setFlagDescription('')
+                    }}
+                  >
+                    <AlertTriangle className="mr-2 h-4 w-4" />
+                    Flag
+                  </Button>
+                </div>
+
+                <div className="flex items-center justify-between rounded-2xl border border-signal-200 bg-signal-50 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-signal-900">Stop interview</p>
+                    <p className="text-xs text-signal-700">Ends the session immediately.</p>
+                  </div>
+                  <Button variant="danger" size="sm" onClick={() => sendDecision('stop')}>
+                    <Slash className="mr-2 h-4 w-4" />
+                    Stop
+                  </Button>
+                </div>
+                <p className="text-[11px] text-ink-400">Applies to next response</p>
+              </CardContent>
+            )}
+          </Card>
+          <Card className="bg-white/90">
+            <CardHeader className="py-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold">Interviewer Notes</h3>
+                <Button variant="ghost" size="sm" onClick={() => setShowNotes((prev) => !prev)}>
+                  {showNotes ? 'Hide' : 'Show'}
+                </Button>
+              </div>
+            </CardHeader>
+            {showNotes && (
+              <CardContent>
+                <textarea
+                  rows={6}
+                  className="w-full rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm"
+                  placeholder="Notes for final recommendation..."
+                />
+              </CardContent>
+            )}
+          </Card>
+          <Card className="bg-white/90">
+            <CardHeader className="py-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-base font-semibold">Follow-up Thread</h3>
+                <Button variant="ghost" size="sm" onClick={() => setShowFollowups((prev) => !prev)}>
+                  {showFollowups ? 'Hide' : 'Show'}
+                </Button>
+              </div>
+            </CardHeader>
+            {showFollowups && (
+              <CardContent className="space-y-4">
+              <div className="space-y-3 rounded-2xl border border-ink-100 bg-white px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">
+                  Add Follow-up
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 rounded-2xl border border-ink-100 bg-white px-3 py-2 text-sm text-ink-700"
+                    placeholder="Add a follow-up question..."
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        const value = (event.currentTarget.value || '').trim()
+                        if (!value) return
+                        const optimisticId = `local-${Date.now()}`
+                        setLocalFollowups((prev) => {
+                          if (prev.some((item) => item.question === value)) return prev
+                          return [
+                            ...prev,
+                            {
+                              id: optimisticId,
+                              question: value,
+                              round_number: targetRoundNumber ?? undefined,
+                              created_at: new Date().toISOString()
+                            }
+                          ]
+                        })
+                        sendAction('manual_followup', {
+                          followup: value,
+                          round_number: targetRoundNumber ?? null,
+                          target_round: targetRoundNumber ?? null
+                        })
+                        event.currentTarget.value = ''
+                      }
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(event) => {
+                      const input = (event.currentTarget
+                        .previousElementSibling as HTMLInputElement | null)
+                      const value = (input?.value || '').trim()
+                      if (!value) return
+                      const optimisticId = `local-${Date.now()}`
+                      setLocalFollowups((prev) => {
+                        if (prev.some((item) => item.question === value)) return prev
+                        return [
+                          ...prev,
+                          {
+                            id: optimisticId,
+                            question: value,
+                            round_number: targetRoundNumber ?? undefined,
+                            created_at: new Date().toISOString()
+                          }
+                        ]
+                      })
+                      sendAction('manual_followup', {
+                        followup: value,
+                        round_number: targetRoundNumber ?? null,
+                        target_round: targetRoundNumber ?? null
+                      })
+                      if (input) input.value = ''
+                    }}
+                  >
+                    Add
+                  </Button>
+                </div>
+                {mergedGateFollowups.length > 0 && (
+                  <div className="space-y-2 pt-2">
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">
+                      Suggestions
+                    </div>
+                    <ul className="space-y-2 text-sm text-ink-700">
+                      {mergedGateFollowups.map((item) => (
+                        <li
+                          key={item}
+                          className="flex items-center justify-between gap-3 rounded-2xl bg-ink-50 px-3 py-2"
+                        >
+                          <span>{item}</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              const optimisticId = `local-${Date.now()}`
+                              setLocalFollowups((prev) => {
+                                if (prev.some((row) => row.question === item)) return prev
+                                return [
+                                  ...prev,
+                                  {
+                                    id: optimisticId,
+                                    question: item,
+                                    round_number: targetRoundNumber ?? undefined,
+                                    created_at: new Date().toISOString()
+                                  }
+                                ]
+                              })
+                              sendAction('manual_followup', {
+                                followup: item,
+                                round_number: targetRoundNumber ?? null,
+                                target_round: targetRoundNumber ?? null
+                              })
+                            }}
+                          >
+                            Ask now
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+              {followupThread.length === 0 && (
+                <div className="rounded-2xl bg-ink-50 px-4 py-3 text-sm text-ink-500">
+                  No follow-ups yet.
+                </div>
+              )}
+              {followupThread.map((item) => (
+                <div key={item.id} className="rounded-2xl bg-ink-50 px-4 py-3 text-sm">
+                  <div className="flex items-center justify-between text-xs text-ink-500">
+                    <span>Round {item.round_number ?? '-'}</span>
+                    <span>{item.source === 'manual' ? 'Manual' : 'Auto'}</span>
+                  </div>
+                  <p className="mt-2 font-semibold text-ink-900">Q: {item.question}</p>
+                  {item.answered ? (
+                    <p className="mt-2 text-ink-700">A: {item.answer}</p>
+                  ) : (
+                    <p className="mt-2 text-ink-500">Awaiting response.</p>
+                  )}
+                </div>
+              ))}
+              </CardContent>
+            )}
           </Card>
         </aside>
       </div>

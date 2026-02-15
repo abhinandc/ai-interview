@@ -68,7 +68,7 @@ Fill in the form and click "Create Session" - auto-redirects to candidate view.
 ```bash
 curl -X POST http://localhost:3000/api/session/create \
   -H "Content-Type: application/json" \
-  -d '{"candidate_name": "Jane Doe", "role": "Account Executive", "level": "mid"}'
+  -d '{"candidate_name": "Test Megha", "role": "Account Executive", "level": "mid"}'
 ```
 Use the returned `session.id` to visit: `http://localhost:3000/candidate/{session.id}`
 

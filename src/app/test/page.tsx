@@ -5,10 +5,35 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 
+const ROLES = [
+  // Sales
+  { label: 'AI Solutions Account Executive', category: 'Sales', level: 'mid' },
+  { label: 'Sales Development Representative (SDR/BDR)', category: 'Sales', level: 'junior' },
+  // Agentic / Full-Stack Engineering
+  { label: 'AI Solutions Engineer — Agentic', category: 'Agentic Engineering', level: 'mid' },
+  { label: 'AI Research Intern — Agentic Systems', category: 'Agentic Engineering', level: 'junior' },
+  { label: 'Full-Stack Engineer', category: 'Full-Stack Engineering', level: 'mid' },
+  { label: 'Full-Stack Engineer — Growth Automation', category: 'Full-Stack Engineering', level: 'mid' },
+  // Marketing
+  { label: 'Growth Marketing Manager — AI Products', category: 'Marketing', level: 'mid' },
+  { label: 'Performance Marketing Specialist', category: 'Marketing', level: 'mid' },
+  { label: 'Brand Strategist', category: 'Marketing', level: 'senior' },
+  { label: 'Campaign Ops Lead', category: 'Marketing', level: 'senior' },
+  // Implementation / Customer Outcomes
+  { label: 'AI Solutions Consultant (Techno-Functional Pre-Sales)', category: 'Implementation', level: 'mid' },
+  { label: 'Client Delivery Lead — AI Enablement', category: 'Implementation', level: 'senior' },
+  { label: 'Customer Outcomes Manager — AI Launch', category: 'Implementation', level: 'mid' },
+  // Data Steward
+  { label: 'Data Steward — Knowledge & Taxonomy', category: 'Data Steward', level: 'mid' },
+  { label: 'Data Steward — Retrieval QA', category: 'Data Steward', level: 'mid' },
+  // People Ops
+  { label: 'People Ops Coordinator', category: 'People Ops', level: 'junior' },
+]
+
 export default function TestPage() {
-  const [candidateName, setCandidateName] = useState('Jane Doe')
-  const [role, setRole] = useState('Account Executive')
-  const [level, setLevel] = useState('mid')
+  const [candidateName, setCandidateName] = useState('Test Megha')
+  const [role, setRole] = useState(ROLES[0].label)
+  const [level, setLevel] = useState(ROLES[0].level)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
@@ -52,8 +77,7 @@ export default function TestPage() {
     <div className="min-h-screen flex items-center justify-center p-6">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <h1 className="text-2xl font-bold">Create Test Session</h1>
-          <p className="text-sm text-ink-500">Quick session creation for testing</p>
+          <h1 className="text-2xl font-bold mb-4">Create Test Session</h1>
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
@@ -61,17 +85,29 @@ export default function TestPage() {
             <Input
               value={candidateName}
               onChange={(e) => setCandidateName(e.target.value)}
-              placeholder="Jane Doe"
+              placeholder="Test Megha"
             />
           </div>
 
           <div>
             <label className="text-sm font-medium block mb-1">Role</label>
-            <Input
+            <select
               value={role}
-              onChange={(e) => setRole(e.target.value)}
-              placeholder="Account Executive"
-            />
+              onChange={(e) => {
+                const selected = ROLES.find(r => r.label === e.target.value)
+                setRole(e.target.value)
+                if (selected) setLevel(selected.level)
+              }}
+              className="w-full rounded-2xl border border-ink-100 bg-white px-4 py-2 text-sm text-ink-900 focus:border-skywash-500 focus:outline-none focus:ring-2 focus:ring-skywash-200"
+            >
+              {Array.from(new Set(ROLES.map(r => r.category))).map(cat => (
+                <optgroup key={cat} label={cat}>
+                  {ROLES.filter(r => r.category === cat).map(r => (
+                    <option key={r.label} value={r.label}>{r.label}</option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
           </div>
 
           <div>

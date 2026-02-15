@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Crimson_Pro, Space_Grotesk } from "next/font/google";
 import "./globals.css";
+import "./markdown-highlight.css";
 
 const displayFont = Crimson_Pro({
   subsets: ["latin"],

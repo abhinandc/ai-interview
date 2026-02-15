@@ -122,6 +122,8 @@ export async function POST(request: Request) {
     }
 
     let followupToAsk: string | null = null
+    let curveballToInject: string | null = null
+    let personaOverride: string | null = null
     try {
       const { data: followupEvents } = await supabaseAdmin
         .from('live_events')
@@ -139,7 +141,7 @@ export async function POST(request: Request) {
         .order('created_at', { ascending: false })
         .limit(20)
 
-      const used = new Set(
+      const usedFollowups = new Set(
         (usedEvents || [])
           .map((event: any) => event.payload?.followup)
           .filter(Boolean)
@@ -149,26 +151,97 @@ export async function POST(request: Request) {
         (event: any) =>
           event.payload?.action_type === 'manual_followup' &&
           event.payload?.followup &&
-          !used.has(event.payload.followup)
+          (event.payload?.target_round === round_number || event.payload?.target_round == null) &&
+          !usedFollowups.has(event.payload.followup)
       )
 
       if (manual?.payload?.followup) {
         followupToAsk = String(manual.payload.followup)
       }
+
+      const { data: curveballUsedEvents } = await supabaseAdmin
+        .from('live_events')
+        .select('*')
+        .eq('session_id', session_id)
+        .eq('event_type', 'curveball_used')
+        .order('created_at', { ascending: false })
+        .limit(20)
+
+      const usedCurveballs = new Set(
+        (curveballUsedEvents || [])
+          .map((event: any) => event.payload?.curveball)
+          .filter(Boolean)
+      )
+
+      const curveballEvent = (followupEvents || []).find(
+        (event: any) =>
+          event.payload?.action_type === 'inject_curveball' &&
+          event.payload?.curveball &&
+          (event.payload?.target_round === round_number || event.payload?.target_round == null) &&
+          !usedCurveballs.has(event.payload.curveball)
+      )
+
+      if (curveballEvent?.payload?.curveball) {
+        curveballToInject = String(curveballEvent.payload.curveball)
+      }
+
+      const { data: personaUsedEvents } = await supabaseAdmin
+        .from('live_events')
+        .select('*')
+        .eq('session_id', session_id)
+        .eq('event_type', 'persona_used')
+        .order('created_at', { ascending: false })
+        .limit(20)
+
+      const usedPersonas = new Set(
+        (personaUsedEvents || [])
+          .map((event: any) => event.payload?.persona)
+          .filter(Boolean)
+      )
+
+      const personaEvent = (followupEvents || []).find(
+        (event: any) =>
+          event.payload?.action_type === 'switch_persona' &&
+          event.payload?.persona &&
+          (event.payload?.target_round === round_number || event.payload?.target_round == null) &&
+          !usedPersonas.has(event.payload.persona)
+      )
+
+      if (personaEvent?.payload?.persona) {
+        personaOverride = String(personaEvent.payload.persona)
+      }
     } catch (error) {
       console.error('Follow-up fetch error:', error)
     }
 
+    const effectivePersonaState = personaOverride || persona_state
+
     // Build conversation for OpenAI
     const messages = [
       { role: 'system', content: PROSPECT_PERSONA },
-      { role: 'system', content: `Current persona state: ${persona_state}. Metrics: ${JSON.stringify(metrics)}` },
+      { role: 'system', content: `Current persona state: ${effectivePersonaState}. Metrics: ${JSON.stringify(metrics)}` },
       { role: 'system', content: `Difficulty level (1-5): ${difficulty}. If 4-5, push on constraints, ask multi-part questions, and introduce curveballs earlier.` },
       ...(followupToAsk
         ? [
             {
               role: 'system',
               content: `Use this interviewer follow-up as your next question verbatim or near-verbatim: "${followupToAsk}"`
+            }
+          ]
+        : []),
+      ...(curveballToInject
+        ? [
+            {
+              role: 'system',
+              content: `Inject this curveball into your next response: "${curveballToInject}".`
+            }
+          ]
+        : []),
+      ...(personaOverride
+        ? [
+            {
+              role: 'system',
+              content: `Override persona state for this response to: "${personaOverride}".`
             }
           ]
         : []),
@@ -215,9 +288,31 @@ export async function POST(request: Request) {
       })
     }
 
+    if (curveballToInject) {
+      await supabaseAdmin.from('live_events').insert({
+        session_id,
+        event_type: 'curveball_used',
+        actor: 'system',
+        payload: { curveball: curveballToInject }
+      })
+    }
+
+    if (personaOverride) {
+      await supabaseAdmin.from('live_events').insert({
+        session_id,
+        event_type: 'persona_used',
+        actor: 'system',
+        payload: { persona: personaOverride }
+      })
+    }
+
     // Analyze message to update metrics
     const updatedMetrics = analyzeMessage(message, response, metrics)
-    const updatedPersonaState = determinePersonaState(conversationLength, updatedMetrics, persona_state)
+    const updatedPersonaState = determinePersonaState(
+      conversationLength,
+      updatedMetrics,
+      effectivePersonaState
+    )
 
     // Log conversation event (live_events table)
     await supabaseAdmin.from('live_events').insert({

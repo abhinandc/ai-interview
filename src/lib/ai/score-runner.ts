@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { generateFollowups, scoreArtifact, STANDARD_DIMENSIONS } from '@/lib/ai/score-smith'
+import { emitRedFlag, fetchScopePackage } from '@/lib/db/helpers'
 
 export async function runScoringForArtifact(artifactId: string) {
   // Get artifact
@@ -11,22 +12,13 @@ export async function runScoringForArtifact(artifactId: string) {
 
   if (error) throw error
 
-  // Get scope package to find round information
-  const { data: scopePackage } = await supabaseAdmin
-    .from('interview_scope_packages')
-    .select('*')
-    .eq('session_id', artifact.session_id)
-    .single()
+  const scopePackage = await fetchScopePackage(artifact.session_id)
 
-  if (!scopePackage) {
-    throw new Error('Scope package not found')
-  }
+  const content = artifact.content || artifact.metadata?.content || ''
+  const roundNumber = artifact.round_number ?? artifact.metadata?.round_number
 
-  const content = artifact.metadata?.content || ''
-  const roundNumber = artifact.metadata?.round_number
-
-  if (!content || !roundNumber) {
-    throw new Error('Artifact content or round number missing')
+  if (!roundNumber) {
+    throw new Error('Artifact round number missing')
   }
 
   const round = scopePackage.round_plan.find((r: any) => r.round_number === roundNumber)
@@ -35,12 +27,51 @@ export async function runScoringForArtifact(artifactId: string) {
     throw new Error('Round not found in scope package')
   }
 
+  // Handle empty/very short content: emit red flag and return early with zero score
+  const wordCount = String(content).trim().split(/\s+/).filter(Boolean).length
+  if (!content || wordCount < 3) {
+    await emitRedFlag(artifact.session_id, {
+      flag_type: 'insufficient_response',
+      severity: 'warning',
+      description: content ? 'Response too short to evaluate' : 'No response submitted',
+      auto_stop: false,
+      round_number: roundNumber,
+      evidence: content ? [{ quote: String(content).slice(0, 120) }] : [],
+    })
+
+    await supabaseAdmin.from('scores').insert({
+      session_id: artifact.session_id,
+      round: roundNumber,
+      overall_score: 0,
+      dimension_scores: {},
+      red_flags: [{ flag_type: 'insufficient_response', severity: 'warning', description: content ? 'Response too short' : 'No response' }],
+      confidence: 0,
+      evidence_quotes: [],
+      recommendation: 'stop',
+      recommended_followups: ['Ask the candidate to elaborate on their response.']
+    })
+
+    await supabaseAdmin.from('live_events').insert({
+      session_id: artifact.session_id,
+      event_type: 'scoring_completed',
+      actor: 'system',
+      payload: { artifact_id: artifact.id, round_number: roundNumber, dimensions: 0 }
+    })
+
+    return { results: [], overall_score: 0 }
+  }
+
+  const dimensions = getDimensionsForRound(round)
+
+  const track = scopePackage.track || ''
+
   const results = await scoreArtifact(
     artifact.session_id,
     roundNumber,
     artifact.id,
     content,
-    STANDARD_DIMENSIONS
+    dimensions,
+    track
   )
 
   const dimensionScores: Record<string, number> = {}
@@ -52,7 +83,7 @@ export async function runScoringForArtifact(artifactId: string) {
   for (const result of results) {
     const dimension = result.dimension
     const score = Number(result.score) || 0
-    const max = STANDARD_DIMENSIONS.find((d) => d.name === dimension)?.maxScore || 0
+    const max = dimensions.find((d) => d.name === dimension)?.maxScore || 0
 
     dimensionScores[dimension] = score
     scoreSum += score
@@ -80,13 +111,12 @@ export async function runScoringForArtifact(artifactId: string) {
     return false
   })
 
-  let redFlags: any[] = []
+  // Build red flags locally (stored in scores.red_flags jsonb column)
+  const redFlags: Array<{ flag_type: string; severity: string; description: string; evidence?: any[] }> = []
 
-  const wordCount = String(content).trim().split(/\s+/).filter(Boolean).length
+  // wordCount >= 3 guaranteed (early return above handles < 3)
   if (wordCount < 5) {
-    await supabaseAdmin.from('red_flags').insert({
-      session_id: artifact.session_id,
-      round_id: roundNumber,
+    redFlags.push({
       flag_type: 'insufficient_response',
       severity: 'high',
       description: 'Response too short to evaluate reliably',
@@ -95,35 +125,34 @@ export async function runScoringForArtifact(artifactId: string) {
   }
 
   if (evidenceQuotes.length === 0) {
-    await supabaseAdmin.from('red_flags').insert({
-      session_id: artifact.session_id,
-      round_id: roundNumber,
+    redFlags.push({
       flag_type: 'no_evidence',
       severity: 'high',
-      description: 'No evidence quotes available for scoring',
-      evidence: []
+      description: 'No evidence quotes available for scoring'
     })
   }
 
-  const { data: freshFlags } = await supabaseAdmin
-    .from('red_flags')
-    .select('*')
-    .eq('session_id', artifact.session_id)
-    .eq('round_id', roundNumber)
-    .order('created_at', { ascending: false })
+  // Emit local red flags as live events for realtime propagation
+  for (const flag of redFlags) {
+    await emitRedFlag(artifact.session_id, {
+      flag_type: flag.flag_type,
+      severity: (flag.severity === 'high' ? 'warning' : flag.severity) as 'warning' | 'critical',
+      description: flag.description,
+      auto_stop: false,
+      round_number: round.round_number,
+      evidence: flag.evidence || [],
+    })
+  }
 
-  redFlags = freshFlags || []
-
-  const hasMajorRedFlag = (redFlags || []).some((flag: any) => {
+  const hasMajorRedFlag = redFlags.some((flag) => {
     if (flag.severity === 'critical') return true
-    const type = String(flag.flag_type || '')
     return [
       'unsafe_data_handling',
       'overconfident_without_verification',
       'overpromising',
       'no_testing_mindset',
       'conflict_escalation'
-    ].includes(type)
+    ].includes(flag.flag_type)
   })
 
   const recommendation =
@@ -162,5 +191,44 @@ export async function runScoringForArtifact(artifactId: string) {
     }
   })
 
+  // Check for critical auto-stop red flags emitted during scoring
+  try {
+    const { data: autoStopEvents } = await supabaseAdmin
+      .from('live_events')
+      .select('id, payload')
+      .eq('session_id', artifact.session_id)
+      .eq('event_type', 'red_flag_detected')
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    const hasAutoStop = (autoStopEvents || []).some(
+      (e: any) => e.payload?.auto_stop === true && e.payload?.severity === 'critical'
+    )
+
+    if (hasAutoStop) {
+      const { forceStopSession } = await import('@/lib/db/helpers')
+      await forceStopSession(
+        artifact.session_id,
+        'Critical red flag detected during scoring'
+      )
+    }
+  } catch (autoStopError) {
+    console.error('Auto-stop check error:', autoStopError)
+  }
+
   return { results, overall_score: overallScore }
+}
+
+function getDimensionsForRound(round: any) {
+  const rubricDimensions = round?.config?.scoring_rubric?.dimensions
+  if (Array.isArray(rubricDimensions) && rubricDimensions.length > 0) {
+    return rubricDimensions.map((dimension: any) => ({
+      name: dimension.name,
+      description: dimension.description || '',
+      maxScore: dimension.maxScore || 20,
+      scoringCriteria: dimension.scoringCriteria || []
+    }))
+  }
+
+  return STANDARD_DIMENSIONS
 }

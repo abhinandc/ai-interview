@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Textarea } from '@/components/ui/textarea'
 import { useSession } from '@/contexts/SessionContext'
 import type { Round } from '@/lib/types/database'
@@ -8,6 +8,8 @@ import type { Round } from '@/lib/types/database'
 export function TextResponseUI({ round }: { round: Round }) {
   const { session } = useSession()
   const [response, setResponse] = useState('')
+  const [outputs, setOutputs] = useState<Record<string, string>>({})
+  const [workflow, setWorkflow] = useState<Record<string, { details: string; quality: string }>>({})
 
   const handleChange = async (value: string) => {
     setResponse(value)
@@ -31,15 +33,113 @@ export function TextResponseUI({ round }: { round: Round }) {
     }
   }
 
-  const wordCount = response.split(/\s+/).filter(Boolean).length
+  const structuredContent = useMemo(() => {
+    if (round.config?.outputs) {
+      return JSON.stringify({ outputs })
+    }
+    if (round.config?.workflow_stages) {
+      return JSON.stringify({ workflow })
+    }
+    return response
+  }, [outputs, workflow, response, round.config?.outputs, round.config?.workflow_stages])
+
+  const wordCount = structuredContent.split(/\s+/).filter(Boolean).length
+
+  const saveStructured = async (payload: Record<string, any>) => {
+    if (!session) return
+    await fetch('/api/artifact/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: session.id,
+        round_number: round.round_number,
+        artifact_type: 'structured_response',
+        content: JSON.stringify(payload),
+        metadata: {
+          draft: true,
+          schema: payload.schema,
+          word_count: structuredContent.split(/\s+/).filter(Boolean).length
+        }
+      })
+    })
+  }
 
   if (!session) return null
 
   return (
     <div className="space-y-4">
-      <Textarea
-        rows={14}
-        placeholder="Write your internal handoff note here...
+      {round.config?.outputs && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm text-ink-600">
+            Provide each section clearly. These will be scored separately.
+          </div>
+          {round.config.outputs.map((label: string) => (
+            <div key={label} className="space-y-2">
+              <label className="text-sm font-semibold text-ink-900">{label}</label>
+              <Textarea
+                rows={4}
+                placeholder={`Enter ${label.toLowerCase()}...`}
+                value={outputs[label] || ''}
+                onChange={(e) => {
+                  const next = { ...outputs, [label]: e.target.value }
+                  setOutputs(next)
+                  saveStructured({ schema: 'marketing_campaign', outputs: next })
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {round.config?.workflow_stages && (
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-ink-100 bg-white px-4 py-3 text-sm text-ink-600">
+            Build the pipeline and include quality gates at each step.
+          </div>
+          {round.config.workflow_stages.map((stage: string) => (
+            <div key={stage} className="rounded-2xl border border-ink-100 bg-white px-4 py-4 space-y-3">
+              <div className="text-sm font-semibold text-ink-900">{stage}</div>
+              <Textarea
+                rows={3}
+                placeholder={`Describe ${stage.toLowerCase()} step...`}
+                value={workflow[stage]?.details || ''}
+                onChange={(e) => {
+                  const next = {
+                    ...workflow,
+                    [stage]: {
+                      details: e.target.value,
+                      quality: workflow[stage]?.quality || ''
+                    }
+                  }
+                  setWorkflow(next)
+                  saveStructured({ schema: 'marketing_workflow', workflow: next })
+                }}
+              />
+              <Textarea
+                rows={2}
+                placeholder="Quality control / brand consistency checks..."
+                value={workflow[stage]?.quality || ''}
+                onChange={(e) => {
+                  const next = {
+                    ...workflow,
+                    [stage]: {
+                      details: workflow[stage]?.details || '',
+                      quality: e.target.value
+                    }
+                  }
+                  setWorkflow(next)
+                  saveStructured({ schema: 'marketing_workflow', workflow: next })
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!round.config?.outputs && !round.config?.workflow_stages && (
+        <Textarea
+          rows={14}
+          placeholder="Write your internal handoff note here...
 
 Example structure:
 - Deal summary (customer, opportunity size, timeline)
@@ -47,10 +147,11 @@ Example structure:
 - Open questions or risks
 - Next steps for the account team
 - Who needs to be involved"
-        value={response}
-        onChange={(e) => handleChange(e.target.value)}
-        className="font-sans"
-      />
+          value={response}
+          onChange={(e) => handleChange(e.target.value)}
+          className="font-sans"
+        />
+      )}
 
       <div className="rounded-2xl border border-ink-100 bg-white px-4 py-3">
         <div className="flex items-center justify-between text-xs">

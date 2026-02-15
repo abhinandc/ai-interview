@@ -62,6 +62,13 @@ export function CodeEditorUI({ round }: { round: Round }) {
   const handleCodeChange = (value: string) => {
     setCode(value)
     scheduleSave(value)
+
+    // Signal content to parent
+    window.dispatchEvent(
+      new CustomEvent('round-content-change', {
+        detail: { round_number: round.round_number, hasContent: value.trim().length > 0 && value.trim() !== initialCode.trim() }
+      })
+    )
   }
 
   const handleLanguageChange = (value: string) => {

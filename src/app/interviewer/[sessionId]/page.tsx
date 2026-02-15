@@ -495,6 +495,7 @@ function InterviewerView() {
   const [widgetConfigState, setWidgetConfigState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [widgetConfigError, setWidgetConfigError] = useState<string | null>(null)
   const [actionNotice, setActionNotice] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
+  const [noteSavedToast, setNoteSavedToast] = useState(false)
   const [resumePreview, setResumePreview] = useState<{
     signedUrl: string
     filename: string | null
@@ -1599,8 +1600,12 @@ function InterviewerView() {
                 disabled={!!sendingAction || !notes.trim()}
                 onClick={async () => {
                   if (!notes.trim()) return
-                  await sendAction('interviewer_note', { note: notes })
-                  setNotes('')
+                  const result = await sendAction('interviewer_note', { note: notes })
+                  if (result?.ok) {
+                    setNotes('')
+                    setNoteSavedToast(true)
+                    setTimeout(() => setNoteSavedToast(false), 2500)
+                  }
                 }}
               >
                 {sendingAction === 'interviewer_note' ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />}
@@ -1610,6 +1615,12 @@ function InterviewerView() {
                 <ShieldAlert className="mb-2 h-4 w-4" />
                 All interviewer actions, notes, and magic-link events are logged for audit and post-assessment review.
               </div>
+              {noteSavedToast && (
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  Note saved successfully.
+                </div>
+              )}
             </CardContent>
             )}
           </Card>

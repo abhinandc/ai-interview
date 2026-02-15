@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
+import { cn } from "@/lib/utils"
 
 function AutoStopOverlay() {
   return (
@@ -803,7 +804,16 @@ function CandidateWorkspace() {
                         onChange={(e) => setFollowupAnswer(e.target.value)}
                       />
                       <div className="flex items-center gap-3">
-                        <Button size="sm" onClick={submitFollowupAnswer} disabled={!followupAnswer.trim() || submittingFollowup}>
+                        <Button
+                          size="sm"
+                          onClick={submitFollowupAnswer}
+                          disabled={!followupAnswer.trim() || submittingFollowup}
+                          className={cn(
+                            (!followupAnswer.trim() && !submittingFollowup)
+                              ? 'opacity-40 cursor-not-allowed'
+                              : ''
+                          )}
+                        >
                           {submittingFollowup ? (
                             <>
                               <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
@@ -834,7 +844,10 @@ function CandidateWorkspace() {
                   onClick={() => handleSubmit(false)}
                   disabled={submitting || hasPendingFollowups}
                   size="lg"
-                  className="min-w-44 rounded-2xl"
+                  className={cn(
+                    "min-w-44 rounded-2xl",
+                    hasPendingFollowups && !submitting && "opacity-40 cursor-not-allowed"
+                  )}
                 >
                   {submitting ? (
                     <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />

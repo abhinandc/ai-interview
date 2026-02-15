@@ -57,6 +57,13 @@ export function MultipleChoiceUI({ round }: { round: Round }) {
   const handleSelect = async (option: MCQOption) => {
     setSelected(option.id)
 
+    // Signal content to parent
+    window.dispatchEvent(
+      new CustomEvent('round-content-change', {
+        detail: { round_number: round.round_number, hasContent: true }
+      })
+    )
+
     if (!session) return
 
     setIsSaving(true)

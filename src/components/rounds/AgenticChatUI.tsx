@@ -150,6 +150,13 @@ export function AgenticChatUI({ round }: { round: Round }) {
   const sendMessage = async () => {
     if (!draft.trim() || loading || !session) return
 
+    // Signal content to parent
+    window.dispatchEvent(
+      new CustomEvent('round-content-change', {
+        detail: { round_number: round.round_number, hasContent: true }
+      })
+    )
+
     const candidateMsg: AgenticMessage = {
       speaker: 'candidate',
       name: 'You',

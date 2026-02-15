@@ -23,6 +23,13 @@ export function TextResponseUI({ round }: { round: Round }) {
   const handleChange = (value: string) => {
     setResponse(value)
 
+    // Signal to parent whether we have content
+    window.dispatchEvent(
+      new CustomEvent('round-content-change', {
+        detail: { round_number: round.round_number, hasContent: value.trim().length > 0 }
+      })
+    )
+
     // Debounce auto-save: wait 800ms after last keystroke
     if (saveTimer.current) clearTimeout(saveTimer.current)
     if (value.length > 0 && session) {

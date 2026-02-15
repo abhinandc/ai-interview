@@ -54,6 +54,13 @@ VP of Operations`,
 
     setEmailThread((prev) => [...prev, newEmail])
 
+    // Signal content to parent
+    window.dispatchEvent(
+      new CustomEvent('round-content-change', {
+        detail: { round_number: round.round_number, hasContent: true }
+      })
+    )
+
     await fetch('/api/artifact/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

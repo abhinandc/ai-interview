@@ -65,6 +65,27 @@ export async function POST(request: Request) {
       )
     }
 
+    const now = new Date().toISOString()
+
+    // For interviewer_note, use a distinct event_type so notes are easily queryable
+    if (action_type === 'interviewer_note') {
+      const { error: noteError } = await supabaseAdmin.from('live_events').insert({
+        session_id,
+        event_type: 'interviewer_note',
+        actor: 'interviewer',
+        payload: {
+          note: payload?.note || '',
+          created_at: now
+        }
+      })
+      if (noteError) {
+        console.error('Failed to save interviewer note:', noteError)
+        throw noteError
+      }
+      return NextResponse.json({ ok: true, event_type: 'interviewer_note' })
+    }
+
+    // Generic action log for all other actions
     await supabaseAdmin.from('live_events').insert({
       session_id,
       event_type: 'interviewer_action',
@@ -74,8 +95,6 @@ export async function POST(request: Request) {
         ...payload
       }
     })
-
-    const now = new Date().toISOString()
 
     // Controls that materially affect the live session should update the scope package/round plan
     // so candidate UI and AI endpoints can react deterministically.

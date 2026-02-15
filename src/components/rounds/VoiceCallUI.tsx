@@ -85,6 +85,13 @@ export function VoiceCallUI({ round }: { round: Round }) {
     setChatActive(true)
     setLoading(true)
 
+    // Signal content to parent
+    window.dispatchEvent(
+      new CustomEvent('round-content-change', {
+        detail: { round_number: round.round_number, hasContent: true }
+      })
+    )
+
     try {
       const response = await fetch('/api/ai/prospect', {
         method: 'POST',

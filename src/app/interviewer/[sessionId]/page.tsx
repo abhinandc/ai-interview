@@ -2172,24 +2172,22 @@ function InterviewerView() {
           />
 
         </aside>
-        <aside className="space-y-3 xl:sticky xl:top-20 xl:h-fit">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Workspace Widgets</CardTitle>
-              <CardDescription className="text-xs">Quick popups</CardDescription>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-2">
-              <Dialog>
-                <DialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="group flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-border/70 bg-background/45 transition hover:bg-background/65"
-                  >
-                    <MessageSquareText className="h-5 w-5 text-primary transition group-hover:scale-105" />
-                    <span className="text-[11px] font-medium">Notes</span>
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="max-w-3xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl">
+        <aside className="space-y-2 xl:sticky xl:top-20 xl:h-fit">
+          <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Widgets</p>
+          <Dialog>
+            <DialogTrigger asChild>
+              <button
+                type="button"
+                className="group flex w-full items-center gap-3 rounded-xl border border-border/70 bg-background/45 px-3 py-3 text-left transition hover:bg-background/65"
+              >
+                <MessageSquareText className="h-5 w-5 shrink-0 text-primary transition group-hover:scale-105" />
+                <div>
+                  <p className="text-sm font-medium">Notes</p>
+                  <p className="text-[11px] text-muted-foreground">Interviewer context</p>
+                </div>
+              </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-3xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl duration-300 data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-95 data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0">
                   <DialogHeader>
                     <DialogTitle className="text-xl">Interviewer Notes</DialogTitle>
                     <DialogDescription>Saved to session action logs for traceability.</DialogDescription>
@@ -2225,19 +2223,22 @@ function InterviewerView() {
                     ) : null}
                   </div>
                 </DialogContent>
-              </Dialog>
+          </Dialog>
 
-              <Dialog>
-                <DialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="group flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-border/70 bg-background/45 transition hover:bg-background/65"
-                  >
-                    <FileSearch className="h-5 w-5 text-primary transition group-hover:scale-105" />
-                    <span className="text-[11px] font-medium">Resume</span>
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="max-w-6xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl">
+          <Dialog>
+            <DialogTrigger asChild>
+              <button
+                type="button"
+                className="group flex w-full items-center gap-3 rounded-xl border border-border/70 bg-background/45 px-3 py-3 text-left transition hover:bg-background/65"
+              >
+                <FileSearch className="h-5 w-5 shrink-0 text-primary transition group-hover:scale-105" />
+                <div>
+                  <p className="text-sm font-medium">Resume</p>
+                  <p className="text-[11px] text-muted-foreground">Candidate PDF view</p>
+                </div>
+              </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-6xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl duration-300 data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-95 data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0">
                   <DialogHeader>
                     <DialogTitle className="text-xl">Quick Resume View</DialogTitle>
                     <DialogDescription>Live file from candidate artifacts or profile storage path.</DialogDescription>
@@ -2280,19 +2281,22 @@ function InterviewerView() {
                     </div>
                   </div>
                 </DialogContent>
-              </Dialog>
+          </Dialog>
 
-              <Dialog>
-                <DialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="group flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-border/70 bg-background/45 transition hover:bg-background/65"
-                  >
-                    <ScrollText className="h-5 w-5 text-primary transition group-hover:scale-105" />
-                    <span className="text-[11px] font-medium">Transcript</span>
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="max-w-4xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl">
+          <Dialog>
+            <DialogTrigger asChild>
+              <button
+                type="button"
+                className="group flex w-full items-center gap-3 rounded-xl border border-border/70 bg-background/45 px-3 py-3 text-left transition hover:bg-background/65"
+              >
+                <ScrollText className="h-5 w-5 shrink-0 text-primary transition group-hover:scale-105" />
+                <div>
+                  <p className="text-sm font-medium">Transcript</p>
+                  <p className="text-[11px] text-muted-foreground">Conversation feed</p>
+                </div>
+              </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-4xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl duration-300 data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-95 data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0">
                   <DialogHeader>
                     <DialogTitle className="text-xl">Live Transcript</DialogTitle>
                     <DialogDescription>Conversation and candidate statements in chronological order.</DialogDescription>
@@ -2315,19 +2319,22 @@ function InterviewerView() {
                     )}
                   </div>
                 </DialogContent>
-              </Dialog>
+          </Dialog>
 
-              <Dialog>
-                <DialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="group flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-border/70 bg-background/45 transition hover:bg-background/65"
-                  >
-                    <ListOrdered className="h-5 w-5 text-primary transition group-hover:scale-105" />
-                    <span className="text-[11px] font-medium">Action Log</span>
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="max-w-4xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl">
+          <Dialog>
+            <DialogTrigger asChild>
+              <button
+                type="button"
+                className="group flex w-full items-center gap-3 rounded-xl border border-border/70 bg-background/45 px-3 py-3 text-left transition hover:bg-background/65"
+              >
+                <ListOrdered className="h-5 w-5 shrink-0 text-primary transition group-hover:scale-105" />
+                <div>
+                  <p className="text-sm font-medium">Action Log</p>
+                  <p className="text-[11px] text-muted-foreground">Event timeline</p>
+                </div>
+              </button>
+            </DialogTrigger>
+            <DialogContent className="max-w-4xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl duration-300 data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-95 data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0">
                   <DialogHeader>
                     <DialogTitle className="text-xl">Candidate Action Log</DialogTitle>
                     <DialogDescription>System timeline of candidate and interview actions.</DialogDescription>
@@ -2346,9 +2353,7 @@ function InterviewerView() {
                     )}
                   </div>
                 </DialogContent>
-              </Dialog>
-            </CardContent>
-          </Card>
+          </Dialog>
         </aside>
         </div>
       </div>

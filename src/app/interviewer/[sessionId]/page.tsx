@@ -1429,217 +1429,6 @@ function InterviewerView() {
               ))}
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Hiring Manager Activity Map</CardTitle>
-              <CardDescription>Heatmap view of session event intensity.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ContributionGraph data={activityData} showLegend year={new Date().getFullYear()} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <FileText className="h-4 w-4 text-primary" />
-                Quick Resume View
-              </CardTitle>
-              <CardDescription>
-                Preview the uploaded resume PDF for this candidate. No hardcoded resume content is shown.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs text-muted-foreground">
-                  {resumePreviewState === 'loading'
-                    ? 'Loading resume preview...'
-                    : resumePreviewState === 'ready'
-                      ? resumePreview?.filename || 'Resume PDF'
-                      : resumePreviewState === 'missing'
-                        ? 'No resume uploaded for this candidate.'
-                        : resumePreviewState === 'error'
-                          ? resumePreviewError || 'Unable to load resume preview.'
-                          : ''}
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => void fetchResumePreview(session.id)}>
-                    Refresh
-                  </Button>
-                  {resolvedResumeUrl && (
-                    <Button size="sm" variant="outline" asChild>
-                      <a href={resolvedResumeUrl} target="_blank" rel="noreferrer">
-                        <ExternalLink className="h-4 w-4" />
-                        Open
-                      </a>
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-3 overflow-hidden rounded-lg border">
-                {resolvedResumeUrl ? (
-                  <iframe src={resolvedResumeUrl} title="Candidate resume preview" className="h-[640px] w-full" />
-                ) : (
-                  <div className="flex h-[240px] items-center justify-center bg-muted/20 p-6 text-sm text-muted-foreground">
-                    Resume PDF not available yet. Upload a resume to the `resumes` storage bucket and set
-                    `candidates.resume_storage_path`, or attach a PDF artifact to this session.
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-
-        <aside className="space-y-6">
-          {/* Voice-Realtime Controls (only show when voice call is active) */}
-          {isVoiceRealtimeActive && (
-            <>
-              <VoiceControlPanel
-                sessionId={session.id}
-                isCallActive={isCallInProgress}
-                track={roleTrack}
-              />
-              <AIAssessmentsPanel sessionId={session.id} />
-
-              {analytics.sayMeter && (
-                <SayMeter
-                  score={analytics.sayMeter.score}
-                  factors={analytics.sayMeter.factors}
-                  summary={analytics.sayMeter.meter_reasoning}
-                  loading={analytics.loading}
-                />
-              )}
-
-              <SuggestionsPanel
-                suggestions={analytics.suggestions}
-                loading={analytics.loading}
-                onDismiss={analytics.dismissSuggestion}
-                onApply={(suggestion) => {
-                  console.log('Apply suggestion:', suggestion)
-                }}
-              />
-            </>
-          )}
-
-          {scores.length === 0 && (
-            <Card className="border-amber-200 bg-amber-50/90 dark:bg-amber-950/30">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <h4 className="text-sm font-semibold text-amber-900 dark:text-amber-300">No Scores Yet</h4>
-                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-                      Scores generate automatically when rounds complete. Or trigger manually:
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        const response = await fetch('/api/score/trigger', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({
-                            session_id: session.id,
-                            round_number: 1
-                          })
-                        })
-                        const result = await response.json()
-                        console.log('Scoring triggered:', result)
-                        alert('Scoring triggered! Check Gate Panel in a few seconds.')
-                      } catch (err) {
-                        console.error('Failed to trigger scoring:', err)
-                        alert('Failed to trigger scoring. Check console.')
-                      }
-                    }}
-                  >
-                    Trigger Scoring
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Role Widget Configuration</CardTitle>
-              <CardDescription>
-                Hiring manager configurable flows for candidate-side role widgets. Saved config streams live to candidate view.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Role family</p>
-                <Select value={widgetRoleFamily} onValueChange={setWidgetRoleFamily}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role family" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {roleWidgetFamilies.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={loadRoleWidgetTemplate}>
-                  Load Recommended Template
-                </Button>
-                <Button size="sm" onClick={saveRoleWidgetConfig} disabled={widgetConfigState === 'saving'}>
-                  {widgetConfigState === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  Save Role Widget Config
-                </Button>
-              </div>
-
-              <Textarea
-                rows={12}
-                value={widgetConfigText}
-                onChange={(event) => setWidgetConfigText(event.target.value)}
-                placeholder='[{"id":"lane-1","title":"Lane","subtitle":"flow","steps":[{"id":"step-1","label":"Task","eta":"06s"}]}]'
-                className="font-mono text-xs"
-              />
-
-              {widgetConfigState === 'saved' && (
-                <p className="text-xs text-emerald-600">Role widget configuration saved.</p>
-              )}
-              {widgetConfigError && (
-                <p className="text-xs text-destructive">{widgetConfigError}</p>
-              )}
-            </CardContent>
-          </Card>
-
-          <GatePanel
-            overall={gateData.overall}
-            confidence={gateData.confidence}
-            dimensions={gateData.dimensions}
-            redFlags={gateData.redFlags}
-            truthLog={gateData.truthLog}
-            followups={mergedGateFollowups}
-            loading={!!sendingAction}
-            expectedDimensions={currentRoundRubric.expectedDimensions}
-            currentRoundNumber={currentRoundRubric.roundNumber}
-            onDecision={sendDecision}
-            onAction={(action) => {
-              if (action === 'escalate') {
-                void sendAction('escalate_difficulty')
-              }
-            }}
-            onAddFollowup={async (followup) => {
-              const lower = followup.toLowerCase().trim()
-              const alreadySent = followupThread.some(
-                (q) => q.question.toLowerCase().trim() === lower
-              ) || localFollowups.some(
-                (q) => q.question.toLowerCase().trim() === lower
-              )
-              if (alreadySent) return
-              await sendAction('manual_followup', { followup })
-            }}
-          />
-
           <Card>
             <CardHeader className="py-3">
               <div className="flex items-center justify-between">
@@ -2238,6 +2027,217 @@ function InterviewerView() {
               </CardContent>
             )}
           </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Hiring Manager Activity Map</CardTitle>
+              <CardDescription>Heatmap view of session event intensity.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ContributionGraph data={activityData} showLegend year={new Date().getFullYear()} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileText className="h-4 w-4 text-primary" />
+                Quick Resume View
+              </CardTitle>
+              <CardDescription>
+                Preview the uploaded resume PDF for this candidate. No hardcoded resume content is shown.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {resumePreviewState === 'loading'
+                    ? 'Loading resume preview...'
+                    : resumePreviewState === 'ready'
+                      ? resumePreview?.filename || 'Resume PDF'
+                      : resumePreviewState === 'missing'
+                        ? 'No resume uploaded for this candidate.'
+                        : resumePreviewState === 'error'
+                          ? resumePreviewError || 'Unable to load resume preview.'
+                          : ''}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => void fetchResumePreview(session.id)}>
+                    Refresh
+                  </Button>
+                  {resolvedResumeUrl && (
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={resolvedResumeUrl} target="_blank" rel="noreferrer">
+                        <ExternalLink className="h-4 w-4" />
+                        Open
+                      </a>
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 overflow-hidden rounded-lg border">
+                {resolvedResumeUrl ? (
+                  <iframe src={resolvedResumeUrl} title="Candidate resume preview" className="h-[640px] w-full" />
+                ) : (
+                  <div className="flex h-[240px] items-center justify-center bg-muted/20 p-6 text-sm text-muted-foreground">
+                    Resume PDF not available yet. Upload a resume to the `resumes` storage bucket and set
+                    `candidates.resume_storage_path`, or attach a PDF artifact to this session.
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        <aside className="space-y-6">
+          {/* Voice-Realtime Controls (only show when voice call is active) */}
+          {isVoiceRealtimeActive && (
+            <>
+              <VoiceControlPanel
+                sessionId={session.id}
+                isCallActive={isCallInProgress}
+                track={roleTrack}
+              />
+              <AIAssessmentsPanel sessionId={session.id} />
+
+              {analytics.sayMeter && (
+                <SayMeter
+                  score={analytics.sayMeter.score}
+                  factors={analytics.sayMeter.factors}
+                  summary={analytics.sayMeter.meter_reasoning}
+                  loading={analytics.loading}
+                />
+              )}
+
+              <SuggestionsPanel
+                suggestions={analytics.suggestions}
+                loading={analytics.loading}
+                onDismiss={analytics.dismissSuggestion}
+                onApply={(suggestion) => {
+                  console.log('Apply suggestion:', suggestion)
+                }}
+              />
+            </>
+          )}
+
+          {scores.length === 0 && (
+            <Card className="border-amber-200 bg-amber-50/90 dark:bg-amber-950/30">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <h4 className="text-sm font-semibold text-amber-900 dark:text-amber-300">No Scores Yet</h4>
+                    <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                      Scores generate automatically when rounds complete. Or trigger manually:
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const response = await fetch('/api/score/trigger', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            session_id: session.id,
+                            round_number: 1
+                          })
+                        })
+                        const result = await response.json()
+                        console.log('Scoring triggered:', result)
+                        alert('Scoring triggered! Check Gate Panel in a few seconds.')
+                      } catch (err) {
+                        console.error('Failed to trigger scoring:', err)
+                        alert('Failed to trigger scoring. Check console.')
+                      }
+                    }}
+                  >
+                    Trigger Scoring
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Role Widget Configuration</CardTitle>
+              <CardDescription>
+                Hiring manager configurable flows for candidate-side role widgets. Saved config streams live to candidate view.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Role family</p>
+                <Select value={widgetRoleFamily} onValueChange={setWidgetRoleFamily}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select role family" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roleWidgetFamilies.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={loadRoleWidgetTemplate}>
+                  Load Recommended Template
+                </Button>
+                <Button size="sm" onClick={saveRoleWidgetConfig} disabled={widgetConfigState === 'saving'}>
+                  {widgetConfigState === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                  Save Role Widget Config
+                </Button>
+              </div>
+
+              <Textarea
+                rows={12}
+                value={widgetConfigText}
+                onChange={(event) => setWidgetConfigText(event.target.value)}
+                placeholder='[{"id":"lane-1","title":"Lane","subtitle":"flow","steps":[{"id":"step-1","label":"Task","eta":"06s"}]}]'
+                className="font-mono text-xs"
+              />
+
+              {widgetConfigState === 'saved' && (
+                <p className="text-xs text-emerald-600">Role widget configuration saved.</p>
+              )}
+              {widgetConfigError && (
+                <p className="text-xs text-destructive">{widgetConfigError}</p>
+              )}
+            </CardContent>
+          </Card>
+
+          <GatePanel
+            overall={gateData.overall}
+            confidence={gateData.confidence}
+            dimensions={gateData.dimensions}
+            redFlags={gateData.redFlags}
+            truthLog={gateData.truthLog}
+            followups={mergedGateFollowups}
+            loading={!!sendingAction}
+            expectedDimensions={currentRoundRubric.expectedDimensions}
+            currentRoundNumber={currentRoundRubric.roundNumber}
+            onDecision={sendDecision}
+            onAction={(action) => {
+              if (action === 'escalate') {
+                void sendAction('escalate_difficulty')
+              }
+            }}
+            onAddFollowup={async (followup) => {
+              const lower = followup.toLowerCase().trim()
+              const alreadySent = followupThread.some(
+                (q) => q.question.toLowerCase().trim() === lower
+              ) || localFollowups.some(
+                (q) => q.question.toLowerCase().trim() === lower
+              )
+              if (alreadySent) return
+              await sendAction('manual_followup', { followup })
+            }}
+          />
+
         </aside>
         </div>
       </div>

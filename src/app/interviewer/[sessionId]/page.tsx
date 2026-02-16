@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { AlertTriangle, BarChart3, BookOpenText, CheckCircle2, Clock, FileSearch, MessageSquareText, Slash } from 'lucide-react'
+import { AlertTriangle, BarChart3, BookOpenText, CheckCircle2, Clock, FileSearch, ListOrdered, MessageSquareText, ScrollText, Slash } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
 import {
   ArrowLeft,
@@ -13,7 +13,6 @@ import {
   FileText,
   Link2,
   Loader2,
-  ShieldAlert,
   Sparkles
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -1318,7 +1317,7 @@ function InterviewerView() {
           </div>
         </header>
 
-        <div className="grid w-full gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+        <div className="grid w-full gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,360px)_minmax(180px,220px)]">
         <section className="grid auto-rows-max gap-6 xl:grid-cols-2">
           <Card className="xl:col-span-2">
             <CardHeader className="space-y-3">
@@ -1439,29 +1438,6 @@ function InterviewerView() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Live Transcript</CardTitle>
-              <CardDescription>Conversation and candidate statements in chronological order.</CardDescription>
-            </CardHeader>
-            <CardContent className="hide-scrollbar max-h-[420px] space-y-3 overflow-y-auto pr-1">
-              {transcript.length === 0 && (
-                <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
-                  Transcript will populate after the conversation starts.
-                </div>
-              )}
-              {transcript.map((entry, index) => (
-                <div key={`${entry.time}-${index}`} className="rounded-lg border bg-muted/20 p-3">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{entry.speaker}</span>
-                    <span>{entry.time}</span>
-                  </div>
-                  <p className="mt-2 text-sm">{entry.content}</p>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <CardTitle className="text-base">Round Timeline</CardTitle>
             </CardHeader>
             <CardContent className="hide-scrollbar max-h-[360px] space-y-2 overflow-y-auto pr-1">
@@ -1493,21 +1469,6 @@ function InterviewerView() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Candidate Action Log</CardTitle>
-            </CardHeader>
-            <CardContent className="hide-scrollbar max-h-[320px] space-y-2 overflow-y-auto pr-1">
-              {actionLog.length === 0 && <p className="text-sm text-muted-foreground">Waiting for actions...</p>}
-              {actionLog.map((entry, index) => (
-                <div key={`${entry.time}-${index}`} className="grid grid-cols-[1fr,1fr,auto] items-center gap-2 text-sm">
-                  <span>{entry.action}</span>
-                  <span className="truncate text-muted-foreground">{entry.detail || '-'}</span>
-                  <span className="text-xs text-muted-foreground">{entry.time}</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
           <Card className="xl:col-span-2">
             <CardHeader className="py-3">
               <div className="flex items-center justify-between">
@@ -1891,145 +1852,6 @@ function InterviewerView() {
           </Card>
 
           <Card className="xl:col-span-2">
-            <CardHeader>
-              <CardTitle className="text-base">Interviewer Workspace Tools</CardTitle>
-              <CardDescription>
-                Focused actions with immersive glass modals for note capture and resume deep-view.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2">
-              <Dialog>
-                <DialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="group flex w-full items-center justify-between rounded-2xl border border-border/60 bg-background/40 px-4 py-4 text-left transition hover:bg-background/55"
-                  >
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Interviewer</p>
-                      <p className="mt-1 text-base font-semibold">Notes Studio</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Capture decision rationale and audit context.</p>
-                    </div>
-                    <MessageSquareText className="h-6 w-6 text-primary transition group-hover:scale-105" />
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="glass-surface border-0 bg-transparent p-0 sm:max-w-3xl">
-                  <div className="relative overflow-hidden rounded-[26px] p-6 sm:p-7">
-                    <div className="glass-glow" aria-hidden="true" />
-                    <div className="glass-highlight" aria-hidden="true" />
-                    <div className="glass-inner-shadow" aria-hidden="true" />
-                    <div className="relative z-10 space-y-4">
-                      <DialogHeader>
-                        <DialogTitle className="text-xl">Interviewer Notes</DialogTitle>
-                        <DialogDescription>Saved to session action logs for traceability.</DialogDescription>
-                      </DialogHeader>
-                      <Textarea
-                        rows={8}
-                        value={notes}
-                        onChange={(event) => setNotes(event.target.value)}
-                        placeholder="Capture context for final recommendation, concern areas, and decision rationale..."
-                        className="rounded-2xl bg-background/45"
-                      />
-                      <Button
-                        variant="secondary"
-                        disabled={!!sendingAction || !notes.trim()}
-                        onClick={async () => {
-                          if (!notes.trim()) return
-                          const result = await sendAction('interviewer_note', { note: notes })
-                          if (result?.ok) {
-                            setNotes('')
-                            setNoteSavedToast(true)
-                            setTimeout(() => setNoteSavedToast(false), 2500)
-                          }
-                        }}
-                      >
-                        {sendingAction === 'interviewer_note' ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />}
-                        {sendingAction === 'interviewer_note' ? 'Saving...' : 'Save Note'}
-                      </Button>
-                      <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-                        <ShieldAlert className="mb-2 h-4 w-4" />
-                        All interviewer actions, notes, and candidate-entry events are retained for post-assessment review.
-                      </div>
-                      {noteSavedToast && (
-                        <div className="flex items-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400 animate-in fade-in slide-in-from-top-1 duration-200">
-                          <CheckCircle2 className="h-4 w-4 shrink-0" />
-                          Note saved successfully.
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-
-              <Dialog>
-                <DialogTrigger asChild>
-                  <button
-                    type="button"
-                    className="group flex w-full items-center justify-between rounded-2xl border border-border/60 bg-background/40 px-4 py-4 text-left transition hover:bg-background/55"
-                  >
-                    <div>
-                      <p className="text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Candidate</p>
-                      <p className="mt-1 text-base font-semibold">Resume Viewer</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Preview uploaded resume with full context.</p>
-                    </div>
-                    <FileSearch className="h-6 w-6 text-primary transition group-hover:scale-105" />
-                  </button>
-                </DialogTrigger>
-                <DialogContent className="glass-surface border-0 bg-transparent p-0 sm:max-w-6xl">
-                  <div className="relative overflow-hidden rounded-[26px] p-6 sm:p-7">
-                    <div className="glass-glow" aria-hidden="true" />
-                    <div className="glass-highlight" aria-hidden="true" />
-                    <div className="glass-inner-shadow" aria-hidden="true" />
-                    <div className="relative z-10 space-y-4">
-                      <DialogHeader>
-                        <DialogTitle className="text-xl">Quick Resume View</DialogTitle>
-                        <DialogDescription>Live file from candidate artifacts or profile storage path.</DialogDescription>
-                      </DialogHeader>
-
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-xs text-muted-foreground">
-                          {resumePreviewState === 'loading'
-                            ? 'Loading resume preview...'
-                            : resumePreviewState === 'ready'
-                              ? resumePreview?.filename || 'Resume PDF'
-                              : resumePreviewState === 'missing'
-                                ? 'No resume uploaded for this candidate.'
-                                : resumePreviewState === 'error'
-                                  ? resumePreviewError || 'Unable to load resume preview.'
-                                  : ''}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Button size="sm" variant="outline" onClick={() => void fetchResumePreview(session.id)}>
-                            Refresh
-                          </Button>
-                          {resolvedResumeUrl && (
-                            <Button size="sm" variant="outline" asChild>
-                              <a href={resolvedResumeUrl} target="_blank" rel="noreferrer">
-                                <ExternalLink className="h-4 w-4" />
-                                Open
-                              </a>
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="overflow-hidden rounded-lg border">
-                        {resolvedResumeUrl ? (
-                          <iframe src={resolvedResumeUrl} title="Candidate resume preview" className="h-[70vh] w-full" />
-                        ) : (
-                          <div className="flex h-[240px] items-center justify-center bg-muted/20 p-6 text-sm text-muted-foreground">
-                            Resume PDF not available yet. Upload a resume to the `resumes` storage bucket and set
-                            `candidates.resume_storage_path`, or attach a PDF artifact to this session.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            </CardContent>
-          </Card>
-
-          <Card className="xl:col-span-2">
             <CardHeader className="py-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">Follow-up Thread</CardTitle>
@@ -2349,6 +2171,184 @@ function InterviewerView() {
             }}
           />
 
+        </aside>
+        <aside className="space-y-3 xl:sticky xl:top-20 xl:h-fit">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Workspace Widgets</CardTitle>
+              <CardDescription className="text-xs">Quick popups</CardDescription>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-2">
+              <Dialog>
+                <DialogTrigger asChild>
+                  <button
+                    type="button"
+                    className="group flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-border/70 bg-background/45 transition hover:bg-background/65"
+                  >
+                    <MessageSquareText className="h-5 w-5 text-primary transition group-hover:scale-105" />
+                    <span className="text-[11px] font-medium">Notes</span>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="max-w-3xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl">Interviewer Notes</DialogTitle>
+                    <DialogDescription>Saved to session action logs for traceability.</DialogDescription>
+                  </DialogHeader>
+                  <div className="mt-3 space-y-3">
+                    <Textarea
+                      rows={8}
+                      value={notes}
+                      onChange={(event) => setNotes(event.target.value)}
+                      placeholder="Capture context for final recommendation, concern areas, and decision rationale..."
+                      className="rounded-xl"
+                    />
+                    <Button
+                      variant="secondary"
+                      disabled={!!sendingAction || !notes.trim()}
+                      onClick={async () => {
+                        if (!notes.trim()) return
+                        const result = await sendAction('interviewer_note', { note: notes })
+                        if (result?.ok) {
+                          setNotes('')
+                          setNoteSavedToast(true)
+                          setTimeout(() => setNoteSavedToast(false), 2500)
+                        }
+                      }}
+                    >
+                      {sendingAction === 'interviewer_note' ? <Loader2 className="h-4 w-4 animate-spin" /> : <BadgeCheck className="h-4 w-4" />}
+                      {sendingAction === 'interviewer_note' ? 'Saving...' : 'Save Note'}
+                    </Button>
+                    {noteSavedToast ? (
+                      <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+                        Note saved successfully.
+                      </div>
+                    ) : null}
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog>
+                <DialogTrigger asChild>
+                  <button
+                    type="button"
+                    className="group flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-border/70 bg-background/45 transition hover:bg-background/65"
+                  >
+                    <FileSearch className="h-5 w-5 text-primary transition group-hover:scale-105" />
+                    <span className="text-[11px] font-medium">Resume</span>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="max-w-6xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl">Quick Resume View</DialogTitle>
+                    <DialogDescription>Live file from candidate artifacts or profile storage path.</DialogDescription>
+                  </DialogHeader>
+                  <div className="mt-3 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs text-muted-foreground">
+                        {resumePreviewState === 'loading'
+                          ? 'Loading resume preview...'
+                          : resumePreviewState === 'ready'
+                            ? resumePreview?.filename || 'Resume PDF'
+                            : resumePreviewState === 'missing'
+                              ? 'No resume uploaded for this candidate.'
+                              : resumePreviewState === 'error'
+                                ? resumePreviewError || 'Unable to load resume preview.'
+                                : ''}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button size="sm" variant="outline" onClick={() => void fetchResumePreview(session.id)}>
+                          Refresh
+                        </Button>
+                        {resolvedResumeUrl ? (
+                          <Button size="sm" variant="outline" asChild>
+                            <a href={resolvedResumeUrl} target="_blank" rel="noreferrer">
+                              <ExternalLink className="h-4 w-4" />
+                              Open
+                            </a>
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="overflow-hidden rounded-xl border">
+                      {resolvedResumeUrl ? (
+                        <iframe src={resolvedResumeUrl} title="Candidate resume preview" className="h-[70vh] w-full" />
+                      ) : (
+                        <div className="flex h-[240px] items-center justify-center bg-muted/20 p-6 text-sm text-muted-foreground">
+                          Resume PDF not available yet.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog>
+                <DialogTrigger asChild>
+                  <button
+                    type="button"
+                    className="group flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-border/70 bg-background/45 transition hover:bg-background/65"
+                  >
+                    <ScrollText className="h-5 w-5 text-primary transition group-hover:scale-105" />
+                    <span className="text-[11px] font-medium">Transcript</span>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl">Live Transcript</DialogTitle>
+                    <DialogDescription>Conversation and candidate statements in chronological order.</DialogDescription>
+                  </DialogHeader>
+                  <div className="hide-scrollbar mt-3 max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+                    {transcript.length === 0 ? (
+                      <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+                        Transcript will populate after the conversation starts.
+                      </div>
+                    ) : (
+                      transcript.map((entry, index) => (
+                        <div key={`${entry.time}-${index}`} className="rounded-lg border bg-muted/20 p-3">
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{entry.speaker}</span>
+                            <span>{entry.time}</span>
+                          </div>
+                          <p className="mt-2 text-sm">{entry.content}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog>
+                <DialogTrigger asChild>
+                  <button
+                    type="button"
+                    className="group flex h-20 flex-col items-center justify-center gap-1 rounded-xl border border-border/70 bg-background/45 transition hover:bg-background/65"
+                  >
+                    <ListOrdered className="h-5 w-5 text-primary transition group-hover:scale-105" />
+                    <span className="text-[11px] font-medium">Action Log</span>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="max-w-4xl rounded-2xl border-border/70 bg-background/95 p-6 backdrop-blur-xl">
+                  <DialogHeader>
+                    <DialogTitle className="text-xl">Candidate Action Log</DialogTitle>
+                    <DialogDescription>System timeline of candidate and interview actions.</DialogDescription>
+                  </DialogHeader>
+                  <div className="hide-scrollbar mt-3 max-h-[70vh] space-y-2 overflow-y-auto pr-1">
+                    {actionLog.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Waiting for actions...</p>
+                    ) : (
+                      actionLog.map((entry, index) => (
+                        <div key={`${entry.time}-${index}`} className="grid grid-cols-[1fr,1fr,auto] items-center gap-2 rounded-lg border bg-muted/20 p-2.5 text-sm">
+                          <span>{entry.action}</span>
+                          <span className="truncate text-muted-foreground">{entry.detail || '-'}</span>
+                          <span className="text-xs text-muted-foreground">{entry.time}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </CardContent>
+          </Card>
         </aside>
         </div>
       </div>
